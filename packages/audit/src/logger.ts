@@ -1,0 +1,129 @@
+import type { AuditEntry } from "@sentinel/types";
+import Database from "better-sqlite3";
+import { type AuditFilters, buildFilterQuery } from "./queries.js";
+import { redactCredentials } from "./redact.js";
+
+const CREATE_TABLE = `
+CREATE TABLE IF NOT EXISTS audit_log (
+  id TEXT PRIMARY KEY,
+  timestamp TEXT NOT NULL,
+  manifest_id TEXT NOT NULL,
+  session_id TEXT NOT NULL,
+  tool TEXT NOT NULL,
+  category TEXT NOT NULL,
+  decision TEXT NOT NULL,
+  parameters_summary TEXT NOT NULL,
+  result TEXT NOT NULL,
+  duration_ms INTEGER,
+  created_at TEXT DEFAULT (datetime('now'))
+)`;
+
+const CREATE_INDEX_SESSION =
+	"CREATE INDEX IF NOT EXISTS idx_audit_session ON audit_log(session_id)";
+const CREATE_INDEX_TIMESTAMP =
+	"CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp)";
+const CREATE_INDEX_TOOL = "CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_log(tool)";
+
+const INSERT_SQL = `
+INSERT INTO audit_log (id, timestamp, manifest_id, session_id, tool, category, decision, parameters_summary, result, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+interface AuditRow {
+	id: string;
+	timestamp: string;
+	manifest_id: string;
+	session_id: string;
+	tool: string;
+	category: string;
+	decision: string;
+	parameters_summary: string;
+	result: string;
+	duration_ms: number | null;
+	created_at: string;
+}
+
+function rowToEntry(row: AuditRow): AuditEntry {
+	return {
+		id: row.id,
+		timestamp: row.timestamp,
+		manifestId: row.manifest_id,
+		sessionId: row.session_id,
+		tool: row.tool,
+		category: row.category as AuditEntry["category"],
+		decision: row.decision as AuditEntry["decision"],
+		parameters_summary: row.parameters_summary,
+		result: row.result as AuditEntry["result"],
+		duration_ms: row.duration_ms ?? undefined,
+	};
+}
+
+export class AuditLogger {
+	private db: Database.Database | null;
+	private insertStmt: Database.Statement;
+
+	constructor(dbPath: string) {
+		const db = new Database(dbPath);
+		db.pragma("journal_mode = WAL");
+		db.exec(CREATE_TABLE);
+		db.exec(CREATE_INDEX_SESSION);
+		db.exec(CREATE_INDEX_TIMESTAMP);
+		db.exec(CREATE_INDEX_TOOL);
+
+		this.db = db;
+		this.insertStmt = db.prepare(INSERT_SQL);
+	}
+
+	log(entry: AuditEntry): void {
+		this.getDb();
+		const redacted = redactCredentials(entry.parameters_summary);
+		this.insertStmt.run(
+			entry.id,
+			entry.timestamp,
+			entry.manifestId,
+			entry.sessionId,
+			entry.tool,
+			entry.category,
+			entry.decision,
+			redacted,
+			entry.result,
+			entry.duration_ms ?? null,
+		);
+	}
+
+	query(filters: AuditFilters): AuditEntry[] {
+		const db = this.getDb();
+		const { sql, params } = buildFilterQuery(filters);
+		const rows = db.prepare(sql).all(...params) as AuditRow[];
+		return rows.map(rowToEntry);
+	}
+
+	getSession(sessionId: string): AuditEntry[] {
+		const db = this.getDb();
+		const rows = db
+			.prepare("SELECT * FROM audit_log WHERE session_id = ? ORDER BY timestamp ASC")
+			.all(sessionId) as AuditRow[];
+		return rows.map(rowToEntry);
+	}
+
+	getRecent(limit: number): AuditEntry[] {
+		const db = this.getDb();
+		const rows = db
+			.prepare("SELECT * FROM audit_log ORDER BY timestamp DESC LIMIT ?")
+			.all(limit) as AuditRow[];
+		return rows.map(rowToEntry);
+	}
+
+	close(): void {
+		if (this.db) {
+			this.db.close();
+			this.db = null;
+		}
+	}
+
+	private getDb(): Database.Database {
+		if (!this.db) {
+			throw new Error("AuditLogger is closed");
+		}
+		return this.db;
+	}
+}
