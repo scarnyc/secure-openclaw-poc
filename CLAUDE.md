@@ -72,6 +72,14 @@ Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Execu
 
 CF Worker + Sandbox containers replaces Docker. See `sentinel/` directory for CF Worker hooks (jiti-loaded `onBeforeToolCall` interceptors). D1 replaces SQLite for audit, KV for policy cache.
 
+### OpenClaw Parallel Agent Model
+
+OpenClaw supports parallel async instance spawning — relevant to executor concurrency design:
+- **`parallel:` blocks** — OpenProse syntax spawns multiple sessions simultaneously, waits for all to complete
+- **Concurrent `Task` calls** — multiple `Task({})` in one response = true parallelism
+- **Sub-agent config** — `maxSpawnDepth: 2`, `maxChildrenPerAgent: 5`, `maxConcurrent: 8`, `runTimeoutSeconds: 900`
+- **Sentinel implications**: executor must handle concurrent `/execute` requests without cross-session state leakage; audit logging (Invariant #2) must be session-scoped; each parallel instance is untrusted
+
 
 ## Project Layout
 
@@ -249,11 +257,17 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **No D1/KV in MVP** — D1 and KV are Phase 2 (CF Workers); MVP uses local SQLite + encrypted files
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
+- **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
+- **Biome v2 monorepo globs** — `!dist` only excludes top-level; use `!**/dist` for `packages/*/dist/`
+- **tsup `--dts` in Docker** — Fails with composite project references (TS6307); Dockerfile uses `tsc -b` instead
+- **Docker entrypoint** — `packages/executor/src/entrypoint.ts` is the container startup file; `server.ts` only exports `createApp`
+- **`noImplicitAnyLet`** — Biome catches `let x;` even when TS allows it; always annotate: `let x: Type;`
+- **Executor concurrency** — OpenClaw can spawn parallel agent instances; executor `:3141` must handle concurrent `/execute` POST requests with session-scoped isolation (no shared mutable state between requests)
 
 
 ## Build Progress
 
-> Updated 2026-03-05: Hybrid build plan. Phase 1 = local MVP (Docker), Phase 2 = CF Workers.
+> Updated 2026-03-05: Phase 1 complete (163 tests, 7 packages). Docker validated (executor container starts, healthcheck passes). Phase 2 = CF Workers.
 
 ### Phase 1: Local MVP
 
@@ -263,43 +277,54 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - [x] Create monorepo scaffolding (pnpm workspace, tsconfig, biome, vitest)
 - [x] Verify toolchain (pnpm install, biome check, tsc, vitest)
 
-#### Step 1 — `packages/types`
-- [ ] ActionManifest, ActionCategory, ToolResult, ToolName (string + constants)
-- [ ] PolicyDecision, SentinelConfig, ToolClassification, ClassificationOverride
-- [ ] AuditEntry, AgentCard, A2ATask, A2AArtifact (stubs)
-- [ ] McpServerConfig, ToolRegistryEntry (MCP compatibility)
+#### Step 1 — `packages/types` ✅
+- [x] ActionManifest, ActionCategory, ToolResult, ToolName (string + constants)
+- [x] PolicyDecision, SentinelConfig, ToolClassification, ClassificationOverride
+- [x] AuditEntry, AgentCard, A2ATask, A2AArtifact (stubs)
+- [x] McpServerConfig, ToolRegistryEntry (MCP compatibility)
 
-#### Step 2 — `packages/crypto`
-- [ ] CredentialVault class (AES-256-GCM, PBKDF2 SHA-512 600k iterations)
-- [ ] Tests: round-trip, wrong password, destroy zeros key, no plaintext in file
+#### Step 2 — `packages/crypto` ✅
+- [x] CredentialVault class (AES-256-GCM, PBKDF2 SHA-512 600k iterations)
+- [x] Tests: round-trip, wrong password, destroy zeros key, no plaintext in file (8 tests)
 
-#### Step 3 — `packages/policy`
-- [ ] classify(manifest, config) → PolicyDecision
-- [ ] Bash parser: read/write/dangerous classification
-- [ ] MCP tool classification (unknown = write, per-server overrides)
-- [ ] Tests: 9+ classification rules with 3+ cases each
+#### Step 3 — `packages/policy` ✅
+- [x] classify(manifest, config) → PolicyDecision
+- [x] Bash parser: read/write/dangerous classification
+- [x] MCP tool classification (unknown = write, per-server overrides)
+- [x] Tests: 94 tests covering classification rules
 
-#### Step 4 — `packages/audit`
-- [ ] AuditLogger class (SQLite, append-only)
-- [ ] Credential redaction in parameters_summary
-- [ ] Tests: round-trip, redaction, session filtering
+#### Step 4 — `packages/audit` ✅
+- [x] AuditLogger class (SQLite, append-only)
+- [x] Credential redaction in parameters_summary
+- [x] Tests: round-trip, redaction, session filtering (27 tests)
 
-#### Step 5 — `packages/executor`
-- [ ] Hono server :3141 (POST /execute, GET /health, GET /agent-card, GET /tools)
-- [ ] Tool registry (built-in + MCP proxy)
-- [ ] Confirmation flow to host CLI
-- [ ] Docker: filtered read-only mount, data volume
+#### Step 5 — `packages/executor` ✅
+- [x] Hono server :3141 (POST /execute, GET /health, GET /agent-card, GET /tools, POST /confirm/:id)
+- [x] Tool registry (built-in: bash, read_file, write_file, edit_file)
+- [x] Confirmation flow (auto-approve reads, confirm writes/dangerous)
+- [x] Deny-list path filtering (defense in depth) — 12 tests
 
-#### Step 6 — `packages/agent`
-- [ ] Agent loop: reason → manifest → POST executor → observe → repeat
-- [ ] Anthropic SDK with streaming
-- [ ] Tool definitions from executor's GET /tools
+#### Step 6 — `packages/agent` ✅
+- [x] Agent loop: reason → manifest → POST executor → observe → repeat
+- [x] Anthropic SDK with streaming
+- [x] Tool definitions from executor's GET /tools — 21 tests
 
-#### Step 7 — `packages/cli`
-- [ ] sentinel chat, vault, audit, config, init
-- [ ] Docker compose orchestration
-- [ ] Confirmation TUI (@clack/prompts + chalk)
+#### Step 7 — `packages/cli` ✅
+- [x] sentinel chat, vault, audit, config, init
+- [x] In-process executor (local dev, Docker deferred)
+- [x] Confirmation TUI (@clack/prompts + chalk) — 1 test
 
 ### Phase 2: CF Workers Deployment (Future)
 
 Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. See `sentinel/` directory structure and `docs/sentinel-hermes-addendum.md` for full spec.
+
+#### Research & Claude Chat Migration
+- [ ] **Copy Claude Desktop Sentinel chats** using Chrome extension — design decisions, threat models
+- [ ] **Read Reddit security warning** — https://www.reddit.com/r/ClaudeAI/comments/1qn53gl/warning_i_tried_clawdbot_powered_by_claude/
+- [ ] **Read "Google suspends OpenClaw over token misuse"** — validates credential filtering design
+- [ ] **Review ClawMetry** (Product Hunt) — observability tool, potential audit dashboard integration
+
+#### Intelligent Model Routing with Plano (Post-MVP)
+- [ ] **Integrate [Plano](https://github.com/katanemo/plano) as AI-native proxy** — 4B-param router for model selection (Kimi K2.5 vs Claude Opus 4.6)
+- [ ] **Configure routing rules** — prompt classification criteria by task type
+- [ ] **Wire Plano into Sentinel** — routed requests still pass through policy engine + audit
