@@ -1,4 +1,13 @@
-import type { ActionManifest, AgentCard, ToolRegistryEntry, ToolResult } from "@sentinel/types";
+import {
+	type ActionManifest,
+	type AgentCard,
+	AgentCardSchema,
+	type ToolRegistryEntry,
+	ToolRegistryEntrySchema,
+	type ToolResult,
+	ToolResultSchema,
+} from "@sentinel/types";
+import { z } from "zod";
 
 const DEFAULT_TIMEOUT_MS = 310_000;
 
@@ -22,7 +31,7 @@ export class ExecutorClient {
 			throw new Error(`Executor returned ${response.status}: ${text}`);
 		}
 
-		return (await response.json()) as ToolResult;
+		return ToolResultSchema.parse(await response.json());
 	}
 
 	async health(): Promise<boolean> {
@@ -45,7 +54,7 @@ export class ExecutorClient {
 			throw new Error(`Failed to fetch tools: ${response.status}`);
 		}
 
-		return (await response.json()) as ToolRegistryEntry[];
+		return z.array(ToolRegistryEntrySchema).parse(await response.json());
 	}
 
 	async getAgentCard(): Promise<AgentCard> {
@@ -57,6 +66,6 @@ export class ExecutorClient {
 			throw new Error(`Failed to fetch agent card: ${response.status}`);
 		}
 
-		return (await response.json()) as AgentCard;
+		return AgentCardSchema.parse(await response.json());
 	}
 }

@@ -193,7 +193,7 @@ describe("POST /execute", () => {
 			parameters: { path: "/project/.env" },
 		});
 		const res = await postExecute(app, manifest);
-		expect(res.status).toBe(200);
+		expect(res.status).toBe(422);
 
 		const result = (await res.json()) as ToolResult;
 		expect(result.success).toBe(false);

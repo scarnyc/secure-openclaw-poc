@@ -72,6 +72,14 @@ Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Execu
 
 CF Worker + Sandbox containers replaces Docker. See `sentinel/` directory for CF Worker hooks (jiti-loaded `onBeforeToolCall` interceptors). D1 replaces SQLite for audit, KV for policy cache.
 
+### OpenClaw Parallel Agent Model
+
+OpenClaw supports parallel async instance spawning — relevant to executor concurrency design:
+- **`parallel:` blocks** — OpenProse syntax spawns multiple sessions simultaneously, waits for all to complete
+- **Concurrent `Task` calls** — multiple `Task({})` in one response = true parallelism
+- **Sub-agent config** — `maxSpawnDepth: 2`, `maxChildrenPerAgent: 5`, `maxConcurrent: 8`, `runTimeoutSeconds: 900`
+- **Sentinel implications**: executor must handle concurrent `/execute` requests without cross-session state leakage; audit logging (Invariant #2) must be session-scoped; each parallel instance is untrusted
+
 
 ## Project Layout
 
@@ -250,6 +258,11 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
 - **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
+- **Biome v2 monorepo globs** — `!dist` only excludes top-level; use `!**/dist` for `packages/*/dist/`
+- **tsup `--dts` in Docker** — Fails with composite project references (TS6307); Dockerfile uses `tsc -b` instead
+- **Docker entrypoint** — `packages/executor/src/entrypoint.ts` is the container startup file; `server.ts` only exports `createApp`
+- **`noImplicitAnyLet`** — Biome catches `let x;` even when TS allows it; always annotate: `let x: Type;`
+- **Executor concurrency** — OpenClaw can spawn parallel agent instances; executor `:3141` must handle concurrent `/execute` POST requests with session-scoped isolation (no shared mutable state between requests)
 
 
 ## Build Progress

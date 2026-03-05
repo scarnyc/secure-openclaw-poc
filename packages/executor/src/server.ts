@@ -1,8 +1,13 @@
 import type { AuditLogger } from "@sentinel/audit";
 import type { ActionManifest, AgentCard, PolicyDecision, SentinelConfig } from "@sentinel/types";
 import { Hono } from "hono";
+import { z } from "zod";
 import { type ConfirmFn, handleExecute, ManifestValidationError } from "./router.js";
 import type { ToolRegistry } from "./tools/registry.js";
+
+const ConfirmBodySchema = z.object({
+	approved: z.boolean(),
+});
 
 interface PendingConfirmation {
 	manifest: ActionManifest;
@@ -54,7 +59,7 @@ export function createApp(
 		try {
 			const body = await c.req.json();
 			const result = await handleExecute(body, config, auditLogger, registry, confirmFn);
-			return c.json(result, result.success ? 200 : 200);
+			return c.json(result, result.success ? 200 : 422);
 		} catch (error) {
 			if (error instanceof ManifestValidationError) {
 				return c.json({ error: error.message }, 400);
@@ -71,8 +76,12 @@ export function createApp(
 			return c.json({ error: "No pending confirmation found" }, 404);
 		}
 
-		const body = await c.req.json();
-		const approved = body.approved === true;
+		const raw = await c.req.json();
+		const parsed = ConfirmBodySchema.safeParse(raw);
+		if (!parsed.success) {
+			return c.json({ error: "Invalid body: expected { approved: boolean }" }, 400);
+		}
+		const approved = parsed.data.approved;
 
 		pendingConfirmations.delete(manifestId);
 		pending.resolve(approved);

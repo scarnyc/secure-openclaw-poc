@@ -1,4 +1,5 @@
 import type { AuditLogger } from "@sentinel/audit";
+import { redactCredentials } from "@sentinel/audit";
 import { classify } from "@sentinel/policy";
 import type {
 	ActionManifest,
@@ -8,6 +9,7 @@ import type {
 	ToolResult,
 } from "@sentinel/types";
 import { ActionManifestSchema } from "@sentinel/types";
+import { filterCredentials } from "./credential-filter.js";
 import type { ToolRegistry } from "./tools/registry.js";
 
 export type ConfirmFn = (manifest: ActionManifest, decision: PolicyDecision) => Promise<boolean>;
@@ -47,7 +49,7 @@ export async function handleExecute(
 		tool: manifest.tool,
 		category: decision.category,
 		decision: decision.action,
-		parameters_summary: summarizeParams(manifest.parameters),
+		parameters_summary: redactCredentials(summarizeParams(manifest.parameters)),
 	};
 
 	if (decision.action === "block") {
@@ -97,9 +99,12 @@ export async function handleExecute(
 		};
 	}
 
-	const result = await handler(manifest.parameters, manifest.id);
+	const rawResult = await handler(manifest.parameters, manifest.id);
 
-	// 5. Audit
+	// 5. Filter credentials from tool output before it reaches the agent
+	const result = filterCredentials(rawResult);
+
+	// 6. Audit
 	auditLogger.log({
 		...auditBase,
 		result: result.success ? "success" : "failure",

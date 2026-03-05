@@ -32,6 +32,9 @@ importers:
       '@sentinel/types':
         specifier: workspace:*
         version: link:../types
+      zod:
+        specifier: ^3.24.0
+        version: 3.25.76
     devDependencies:
       tsup:
         specifier: ^8.4.0

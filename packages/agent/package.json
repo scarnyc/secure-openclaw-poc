@@ -19,7 +19,8 @@
 	},
 	"dependencies": {
 		"@sentinel/types": "workspace:*",
-		"@anthropic-ai/sdk": "^0.39.0"
+		"@anthropic-ai/sdk": "^0.39.0",
+		"zod": "^3.24.0"
 	},
 	"devDependencies": {
 		"tsup": "^8.4.0",

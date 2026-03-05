@@ -3,7 +3,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
-import type { SentinelConfig } from "@sentinel/types";
+import { type SentinelConfig, SentinelConfigSchema } from "@sentinel/types";
 import { auditCommand } from "./commands/audit.js";
 import { chatCommand } from "./commands/chat.js";
 import { initCommand } from "./commands/init.js";
@@ -14,7 +14,7 @@ const CONFIG_PATH = resolve(DATA_DIR, "sentinel.json");
 
 async function loadConfig(): Promise<SentinelConfig> {
 	const raw = await readFile(CONFIG_PATH, "utf-8");
-	return JSON.parse(raw) as SentinelConfig;
+	return SentinelConfigSchema.parse(JSON.parse(raw));
 }
 
 async function main(): Promise<void> {
