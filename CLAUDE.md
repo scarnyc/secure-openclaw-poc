@@ -249,11 +249,12 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **No D1/KV in MVP** — D1 and KV are Phase 2 (CF Workers); MVP uses local SQLite + encrypted files
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
+- **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
 
 
 ## Build Progress
 
-> Updated 2026-03-05: Phase 1 complete (163 tests, 7 packages). Docker not yet validated (not installed on Mac mini). Phase 2 = CF Workers.
+> Updated 2026-03-05: Phase 1 complete (163 tests, 7 packages). Docker validated (executor container starts, healthcheck passes). Phase 2 = CF Workers.
 
 ### Phase 1: Local MVP
 
