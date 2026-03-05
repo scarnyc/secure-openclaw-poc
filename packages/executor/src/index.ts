@@ -1,0 +1,2 @@
+// @sentinel/executor — placeholder
+export {};

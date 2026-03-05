@@ -1,0 +1,36 @@
+{
+	"classifications": [
+		{
+			"tool": "read_file",
+			"defaultCategory": "read"
+		},
+		{
+			"tool": "write_file",
+			"defaultCategory": "write"
+		},
+		{
+			"tool": "edit_file",
+			"defaultCategory": "write"
+		},
+		{
+			"tool": "bash",
+			"defaultCategory": "write",
+			"overrides": [
+				{
+					"condition": "command_classified_as:read",
+					"category": "read",
+					"reason": "Bash command classified as read-only"
+				},
+				{
+					"condition": "command_classified_as:dangerous",
+					"category": "dangerous",
+					"reason": "Bash command classified as dangerous"
+				}
+			]
+		}
+	],
+	"mcpDefaults": {
+		"unknownTool": "write",
+		"serverOverrides": {}
+	}
+}

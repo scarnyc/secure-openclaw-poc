@@ -1,0 +1,36 @@
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Runtime data
+data/
+*.db
+*.enc
+
+# Secrets
+.env
+.env.*
+.dev.vars
+!.env.example
+!.dev.vars.example
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# Temp
+tmp/
+.tmp/

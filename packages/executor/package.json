@@ -1,0 +1,35 @@
+{
+	"name": "@sentinel/executor",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsup src/index.ts src/server.ts --format esm --dts",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"dev": "tsx src/server.ts"
+	},
+	"dependencies": {
+		"@sentinel/types": "workspace:*",
+		"@sentinel/crypto": "workspace:*",
+		"@sentinel/policy": "workspace:*",
+		"@sentinel/audit": "workspace:*",
+		"hono": "^4.7.0",
+		"execa": "^9.5.0",
+		"zod": "^3.24.0"
+	},
+	"devDependencies": {
+		"tsup": "^8.4.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
+}

@@ -1,0 +1,29 @@
+{
+	"name": "@sentinel/cli",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"bin": {
+		"sentinel": "./dist/main.js"
+	},
+	"scripts": {
+		"build": "tsup src/main.ts --format esm",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"dev": "tsx src/main.ts"
+	},
+	"dependencies": {
+		"@sentinel/types": "workspace:*",
+		"@sentinel/crypto": "workspace:*",
+		"@sentinel/executor": "workspace:*",
+		"@sentinel/agent": "workspace:*",
+		"@clack/prompts": "^0.9.0",
+		"chalk": "^5.4.0"
+	},
+	"devDependencies": {
+		"tsup": "^8.4.0",
+		"tsx": "^4.19.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
+}

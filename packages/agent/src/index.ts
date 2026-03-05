@@ -1,0 +1,2 @@
+// @sentinel/agent — placeholder
+export {};

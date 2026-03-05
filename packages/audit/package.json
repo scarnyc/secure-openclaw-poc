@@ -1,0 +1,30 @@
+{
+	"name": "@sentinel/audit",
+	"version": "0.1.0",
+	"private": true,
+	"type": "module",
+	"main": "./dist/index.js",
+	"types": "./dist/index.d.ts",
+	"exports": {
+		".": {
+			"types": "./dist/index.d.ts",
+			"import": "./dist/index.js"
+		}
+	},
+	"scripts": {
+		"build": "tsup src/index.ts --format esm --dts",
+		"typecheck": "tsc --noEmit",
+		"test": "vitest run",
+		"test:coverage": "vitest run --coverage"
+	},
+	"dependencies": {
+		"@sentinel/types": "workspace:*",
+		"better-sqlite3": "^11.8.0"
+	},
+	"devDependencies": {
+		"@types/better-sqlite3": "^7.6.12",
+		"tsup": "^8.4.0",
+		"typescript": "^5.7.0",
+		"vitest": "^3.0.0"
+	}
+}

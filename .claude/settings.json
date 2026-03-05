@@ -1,0 +1,42 @@
+{
+	"permissions": {
+		"allow": [
+			"Bash(wrangler d1:*)",
+			"Bash(wrangler kv:*)",
+			"Bash(pnpm test:*)",
+			"Bash(pnpm test)",
+			"Bash(pnpm vitest:*)",
+			"Bash(pnpm vitest run:*)",
+			"Bash(pnpm lint:*)",
+			"Bash(pnpm biome:*)",
+			"Bash(pnpm tsc:*)",
+			"Bash(pnpm typecheck:*)",
+			"Bash(pnpm format:check)",
+			"Bash(pnpm --filter:*)"
+		]
+	},
+	"hooks": {
+		"PreToolUse": [
+			{
+				"matcher": "Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "file=$(echo \"$TOOL_INPUT\" | jq -r '.file_path // empty'); case \"$file\" in *.dev.vars|*.env|*.env.*) echo 'BLOCK: Cannot edit secret files (.dev.vars, .env). Use wrangler secret put or .dev.vars.example instead.' >&2; exit 2;; esac"
+					}
+				]
+			}
+		],
+		"PostToolUse": [
+			{
+				"matcher": "Edit|Write",
+				"hooks": [
+					{
+						"type": "command",
+						"command": "file=$(echo \"$TOOL_INPUT\" | jq -r '.file_path // empty'); case \"$file\" in *.ts|*.tsx) pnpm biome format --write \"$file\" 2>/dev/null || true;; esac"
+					}
+				]
+			}
+		]
+	}
+}

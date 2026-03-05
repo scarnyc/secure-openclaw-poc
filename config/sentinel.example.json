@@ -1,0 +1,15 @@
+{
+	"executor": {
+		"port": 3141,
+		"host": "127.0.0.1"
+	},
+	"classifications": [],
+	"autoApproveReadOps": true,
+	"auditLogPath": "./data/audit.db",
+	"vaultPath": "./data/vault.enc",
+	"llm": {
+		"provider": "anthropic",
+		"model": "claude-sonnet-4-5-20250514",
+		"maxTokens": 8192
+	}
+}

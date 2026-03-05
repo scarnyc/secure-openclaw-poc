@@ -1,0 +1,2 @@
+// @sentinel/types — placeholder
+export {};

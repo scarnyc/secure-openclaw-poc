@@ -1,0 +1,34 @@
+services:
+  executor:
+    build:
+      context: .
+      target: executor
+    ports:
+      - "127.0.0.1:3141:3141"
+    volumes:
+      - ./data:/app/data
+      - .:/workspace:ro
+    networks:
+      - sentinel-net
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3141/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  agent:
+    build:
+      context: .
+      target: agent
+    environment:
+      - EXECUTOR_URL=http://executor:3141
+      - ANTHROPIC_API_KEY
+    networks:
+      - sentinel-net
+    depends_on:
+      executor:
+        condition: service_healthy
+
+networks:
+  sentinel-net:
+    driver: bridge
