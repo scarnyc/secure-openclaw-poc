@@ -34,7 +34,8 @@ pnpm install
 
 | Document | Purpose |
 |----------|---------|
-| `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping |
+| `docs/plans/2026-03-05-policy-permissions-redesign.md` | Phase 1.5 design doc — policy document schema, classify() flow, workspace enforcement, testing strategy |
+| `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping, CF Workers checklist, Replit agent security lessons, and security framework references |
 | `docs/sentinel-hermes-addendum.md` | Hermes Agent feature additions [H1]-[H4] (ComputeBackend, bash classifier, session scoping, skill evaluation) |
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
 | `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 6 security invariants |
@@ -267,64 +268,49 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 
 ## Build Progress
 
-> Updated 2026-03-05: Phase 1 complete (163 tests, 7 packages). Docker validated (executor container starts, healthcheck passes). Phase 2 = CF Workers.
+### Phase 1: Local MVP ✅ (Merged)
 
-### Phase 1: Local MVP
+Completed 2026-03-05. 163 tests, 7 packages, Docker validated. Merged to `main` (commit `0af8fcc`).
 
-#### Step 0 — Scaffolding
-- [x] Git init + initial commit with existing docs
-- [x] Update CLAUDE.md (pnpm, Biome, tsup, Docker arch)
-- [x] Create monorepo scaffolding (pnpm workspace, tsconfig, biome, vitest)
-- [x] Verify toolchain (pnpm install, biome check, tsc, vitest)
+**Packages delivered:** types, crypto (AES-256-GCM vault), policy (94 classification tests), audit (SQLite, credential redaction), executor (Hono :3141, deny-list filtering), agent (Anthropic SDK streaming), cli (TUI + in-process executor).
 
-#### Step 1 — `packages/types` ✅
-- [x] ActionManifest, ActionCategory, ToolResult, ToolName (string + constants)
-- [x] PolicyDecision, SentinelConfig, ToolClassification, ClassificationOverride
-- [x] AuditEntry, AgentCard, A2ATask, A2AArtifact (stubs)
-- [x] McpServerConfig, ToolRegistryEntry (MCP compatibility)
+### Phase 1.5: Policy & Permissions Redesign (In Progress)
 
-#### Step 2 — `packages/crypto` ✅
-- [x] CredentialVault class (AES-256-GCM, PBKDF2 SHA-512 600k iterations)
-- [x] Tests: round-trip, wrong password, destroy zeros key, no plaintext in file (8 tests)
+Sentinel absorbs OpenClaw's security concepts; OpenClaw runs permissive with Sentinel as sole trust boundary. Design: Approach B (separate policy document — `config/policy.json` with own Zod schema, loaded at startup).
 
-#### Step 3 — `packages/policy` ✅
-- [x] classify(manifest, config) → PolicyDecision
-- [x] Bash parser: read/write/dangerous classification
-- [x] MCP tool classification (unknown = write, per-server overrides)
-- [x] Tests: 94 tests covering classification rules
+**MVP scope (protect local Mac Mini):**
+- [ ] Workspace scoping — per-agent filesystem containment (allow-list model replaces deny-list)
+- [ ] Per-agent tool policies — allow/deny lists keyed by agent ID
+- [ ] Tool groups — ergonomic grouping (`group:fs`, `group:runtime`, etc.)
+- [ ] Exec approval allowlists — pattern-based auto-approve to prevent confirmation fatigue
 
-#### Step 4 — `packages/audit` ✅
-- [x] AuditLogger class (SQLite, append-only)
-- [x] Credential redaction in parameters_summary
-- [x] Tests: round-trip, redaction, session filtering (27 tests)
-
-#### Step 5 — `packages/executor` ✅
-- [x] Hono server :3141 (POST /execute, GET /health, GET /agent-card, GET /tools, POST /confirm/:id)
-- [x] Tool registry (built-in: bash, read_file, write_file, edit_file)
-- [x] Confirmation flow (auto-approve reads, confirm writes/dangerous)
-- [x] Deny-list path filtering (defense in depth) — 12 tests
-
-#### Step 6 — `packages/agent` ✅
-- [x] Agent loop: reason → manifest → POST executor → observe → repeat
-- [x] Anthropic SDK with streaming
-- [x] Tool definitions from executor's GET /tools — 21 tests
-
-#### Step 7 — `packages/cli` ✅
-- [x] sentinel chat, vault, audit, config, init
-- [x] In-process executor (local dev, Docker deferred)
-- [x] Confirmation TUI (@clack/prompts + chalk) — 1 test
+**Deferred to CF deployment:**
+- [ ] Sandbox mode enforcement — schema defined in MVP, enforcement requires Linux (gVisor/Kata)
+- [ ] Elevated gating — escape-to-host concept, needs real sandbox first
+- [ ] Resume tokens — async approval flows for distributed environments
+- [ ] JWT authentication — agent↔executor auth for networked CF deployment (local MVP uses localhost trust)
+- [ ] OWASP Top 10 validation — systematic audit of executor API against current OWASP Top 10
+- [ ] OWASP ASVS L2 — Application Security Verification Standard level 2 (standard for security-critical apps)
+- [ ] NIST AI RMF alignment — AI Risk Management Framework review for agent-specific threat categories
+- [ ] CWE-77/78 hardening — command injection coverage beyond bash parser (OS command + argument injection)
+- [ ] CF Workers security checklist — see `docs/server-hardening.md` §CF Workers Security Checklist (W1-W7)
+- [ ] Replit-style SAST integration — see `docs/server-hardening.md` §Replit Agent Security Lessons (R1-R5)
 
 ### Phase 2: CF Workers Deployment (Future)
 
-Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. See `sentinel/` directory structure and `docs/sentinel-hermes-addendum.md` for full spec.
+Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. See `sentinel/` directory and `docs/sentinel-hermes-addendum.md` for full spec.
 
-#### Research & Claude Chat Migration
-- [ ] **Copy Claude Desktop Sentinel chats** using Chrome extension — design decisions, threat models
-- [ ] **Read Reddit security warning** — https://www.reddit.com/r/ClaudeAI/comments/1qn53gl/warning_i_tried_clawdbot_powered_by_claude/
-- [ ] **Read "Google suspends OpenClaw over token misuse"** — validates credential filtering design
-- [ ] **Review ClawMetry** (Product Hunt) — observability tool, potential audit dashboard integration
+#### Pre-CF Gate (must pass before CF migration)
+- [ ] Red team exercise — adversarial testing against all 6 security invariants
+- [ ] Adversarial testing — prompt injection, manifest forgery, policy bypass attempts
+- [ ] Mutation testing — verify test suite catches injected faults in policy/executor/credential-filter
+- [ ] Security scan — automated vulnerability scanning (dependencies + code)
+- [ ] Penetration test — post-scan, manual pen test of executor API surface and agent↔executor trust boundary
+- [ ] SAST scan (Semgrep) — static analysis with Replit-curated ruleset + custom Sentinel rules
 
-#### Intelligent Model Routing with Plano (Post-MVP)
-- [ ] **Integrate [Plano](https://github.com/katanemo/plano) as AI-native proxy** — 4B-param router for model selection (Kimi K2.5 vs Claude Opus 4.6)
-- [ ] **Configure routing rules** — prompt classification criteria by task type
-- [ ] **Wire Plano into Sentinel** — routed requests still pass through policy engine + audit
+#### Backlog
+- [ ] sqlite-vec integration design (paused) — embedding model, vec0 schema, hybrid FTS5+vec0 queries
+- [ ] CF Workers migration — D1 for audit, KV for policy cache, Wrangler setup
+- [ ] Plano model routing — AI-native proxy for intelligent model selection
+- [ ] Research: CopilotKit / ag-ui evaluation for agent frontend layer
+- [ ] Research: copy Claude Desktop Sentinel chats, Reddit security warning, ClawMetry review
