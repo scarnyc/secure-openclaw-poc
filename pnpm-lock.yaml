@@ -73,15 +73,24 @@ importers:
       '@clack/prompts':
         specifier: ^0.9.0
         version: 0.9.1
+      '@hono/node-server':
+        specifier: ^1.14.0
+        version: 1.19.11(hono@4.12.5)
       '@sentinel/agent':
         specifier: workspace:*
         version: link:../agent
+      '@sentinel/audit':
+        specifier: workspace:*
+        version: link:../audit
       '@sentinel/crypto':
         specifier: workspace:*
         version: link:../crypto
       '@sentinel/executor':
         specifier: workspace:*
         version: link:../executor
+      '@sentinel/policy':
+        specifier: workspace:*
+        version: link:../policy
       '@sentinel/types':
         specifier: workspace:*
         version: link:../types
@@ -424,6 +433,12 @@ packages:
     engines: {node: '>=18'}
     cpu: [x64]
     os: [win32]
+
+  '@hono/node-server@1.19.11':
+    resolution: {integrity: sha512-dr8/3zEaB+p0D2n/IUrlPF1HZm586qgJNXK1a9fhg/PzdtkK7Ksd5l312tJX2yBuALqDYBlG20QEbayqPyxn+g==}
+    engines: {node: '>=18.14.1'}
+    peerDependencies:
+      hono: ^4
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1555,6 +1570,10 @@ snapshots:
 
   '@esbuild/win32-x64@0.27.3':
     optional: true
+
+  '@hono/node-server@1.19.11(hono@4.12.5)':
+    dependencies:
+      hono: 4.12.5
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:

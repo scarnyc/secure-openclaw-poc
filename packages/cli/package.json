@@ -17,6 +17,9 @@
 		"@sentinel/crypto": "workspace:*",
 		"@sentinel/executor": "workspace:*",
 		"@sentinel/agent": "workspace:*",
+		"@sentinel/audit": "workspace:*",
+		"@sentinel/policy": "workspace:*",
+		"@hono/node-server": "^1.14.0",
 		"@clack/prompts": "^0.9.0",
 		"chalk": "^5.4.0"
 	},

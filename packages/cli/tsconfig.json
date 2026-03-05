@@ -8,6 +8,8 @@
 	"references": [
 		{ "path": "../types" },
 		{ "path": "../crypto" },
+		{ "path": "../policy" },
+		{ "path": "../audit" },
 		{ "path": "../executor" },
 		{ "path": "../agent" }
 	]

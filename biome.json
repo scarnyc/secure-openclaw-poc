@@ -27,6 +27,6 @@
 		}
 	},
 	"files": {
-		"includes": ["**", "!node_modules", "!dist", "!coverage", "!data", "!.claude"]
+		"includes": ["**", "!node_modules", "!**/dist", "!coverage", "!data", "!.claude"]
 	}
 }
