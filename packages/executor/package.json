@@ -18,12 +18,13 @@
 		"dev": "tsx src/server.ts"
 	},
 	"dependencies": {
-		"@sentinel/types": "workspace:*",
+		"@hono/node-server": "^1.14.0",
+		"@sentinel/audit": "workspace:*",
 		"@sentinel/crypto": "workspace:*",
 		"@sentinel/policy": "workspace:*",
-		"@sentinel/audit": "workspace:*",
-		"hono": "^4.7.0",
+		"@sentinel/types": "workspace:*",
 		"execa": "^9.5.0",
+		"hono": "^4.7.0",
 		"zod": "^3.24.0"
 	},
 	"devDependencies": {
