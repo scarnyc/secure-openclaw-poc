@@ -1,6 +1,17 @@
 # Sentinel — Secure Agent Runtime
 
-Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Built as a local-first MVP, with optional deployment on Cloudflare Workers once proven.
+Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Local-first, runs on Mac Mini via Docker Compose.
+
+## Next Step — Hardening TODO
+
+**MVP scope (protect local Mac Mini):**
+- [ ] Agent proposes, human reviews in batch (PR model)
+- [ ] Set up OpenClaw — be cautious and read the setup steps in OpenClaw repo as we will need to modify them to work with Sentinel
+- [ ] Google Workspace CLI integration — [`googleworkspace/cli`](https://github.com/googleworkspace/cli) as MCP tool source for executor
+- [ ] Agent container: `network_mode: "none"` in docker-compose.yml — zero egress
+- [ ] Executor: path whitelist (`allowedRoots: ["~/Code"]`) — reject file ops outside
+- [ ] Config freeze: `Object.freeze()` on loaded config, crash on missing policy (Invariant #6)
+- [ ] Bash deny-list additions: `rm -rf /`, `rm -rf ~`, `rm -rf $HOME`, mail/email commands
 
 
 ## Quick Commands
@@ -34,8 +45,7 @@ pnpm install
 
 | Document | Purpose |
 |----------|---------|
-| `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping, CF Workers checklist, Replit agent security lessons, and security framework references |
-| `docs/sentinel-hermes-addendum.md` | Hermes Agent feature additions [H1]-[H4] (ComputeBackend, bash classifier, session scoping, skill evaluation) |
+| `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping |
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
 | `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 6 security invariants |
 | `.claude/skills/upstream-sync/SKILL.md` | `/upstream-sync` skill — rebase on moltworker (user-only) |
@@ -76,10 +86,6 @@ pnpm install
 
 Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. Confirmation TUI runs on host (trust anchor), never inside Docker.
 
-### Phase 2: Cloudflare Workers Deployment (Future)
-
-CF Worker + Sandbox containers replaces Docker. See `sentinel/` directory for CF Worker hooks (jiti-loaded `onBeforeToolCall` interceptors). D1 replaces SQLite for audit, KV for policy cache.
-
 ### OpenClaw Parallel Agent Model
 
 OpenClaw supports parallel async instance spawning — relevant to executor concurrency design:
@@ -101,8 +107,7 @@ secure-openclaw/
 │   ├── executor/                # Trusted process (Hono :3141)
 │   ├── agent/                   # Untrusted process (LLM loop)
 │   └── cli/                     # Host orchestrator + TUI
-├── sentinel/                    # CF Worker hooks (Phase 2)
-│   ├── hooks/                   # onBeforeToolCall extensions (jiti-loaded)
+├── sentinel/                    # Sentinel-specific extensions
 │   ├── manifests/               # Action manifest Zod schemas
 │   ├── mem-hardening/           # claude-mem validation & caps
 │   └── __tests__/               # Sentinel-specific tests
@@ -137,7 +142,7 @@ These 6 rules are **non-negotiable**. Every PR must maintain them. Each has a re
 ### TypeScript
 - **Strict mode** (`tsconfig.json` strict: true, target ES2022, module ESNext)
 - **Zod** for all external input validation (tool args, API payloads, manifest schemas)
-- **tsup** for package builds; coexists with wrangler for CF Worker bundling (Phase 2)
+- **tsup** for package builds
 - **Never** include credential values in error messages, even truncated
 - **Biome** for linting and formatting (not ESLint/Prettier/OXLint)
 
@@ -206,26 +211,37 @@ Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation
 - **Use cases**: Semantic memory retrieval, skill matching by embedding similarity, credential pattern anomaly detection
 - **Integration**: Loads as extension into existing better-sqlite3 instance; no new infrastructure
 
+### Open Design Work (sqlite-vec)
+- **Status**: Paused — resume before Wave 3 implementation
+- **Remaining decisions**: Embedding model choice (local vs API), `vec0` table schema, hybrid FTS5+vec0 query strategy, embedding generation pipeline at observation write time
+
+### Evaluation Queue
+- **CopilotKit** — Generative UI framework for AI-native apps; evaluate for agent frontend layer + dedicated chatbot
+  - Org: https://github.com/CopilotKit
+  - Key repos: `generative-ui`, `deep-agents-demo`, `with-mcp-apps`
+- **ag-ui** — Agent-UI protocol for streaming agent state to frontends; evaluate for MCP app integration
+  - Repo: https://github.com/ag-ui-protocol/ag-ui
+- **A2A Protocol** — Google's Agent-to-Agent protocol for multi-agent orchestration
+  - Decision: OpenClaw subagents/parallel agents — A2A vs skills binding model
 
 ## Environment Variables
 
 | Variable | Scope | Description |
 |----------|-------|-------------|
-| `ANTHROPIC_API_KEY` | Container | CLAUDE AI provider key (required) |
+| `ANTHROPIC_API_KEY` | Container | Claude AI provider key (required) |
 | `OPENAI_API_KEY` | Container | GPT AI provider key (required) |
-| `GEMINI_API_KEY` | Container | GOOGLE AI provider key (required) |
-| `MOLTBOT_GATEWAY_TOKEN` | Worker | Gateway access protection |
+| `GEMINI_API_KEY` | Container | Google AI provider key (required) |
 | `SENTINEL_POLICY_VERSION` | Container | Policy version string (read at startup) |
-| `SENTINEL_AUDIT_ENABLED` | Container | Enable/disable D1 audit logging |
+| `SENTINEL_AUDIT_ENABLED` | Container | Enable/disable audit logging |
 | `CLAUDE_MEM_DATA_DIR` | Container | claude-mem SQLite path override |
 
-Secrets are stored via `wrangler secret put`. Local dev uses `.dev.vars` (see `.dev.vars.example`). **Never** commit `.dev.vars` with real values.
+API keys stored in encrypted vault via `sentinel init`. Local dev uses `.dev.vars` (see `.dev.vars.example`). **Never** commit `.dev.vars` with real values.
 
 
 ## Automations
 
 ### Hooks (`.claude/settings.json`)
-- **PreToolUse**: Blocks edits to `.dev.vars` / `.env` files (use `wrangler secret put` instead)
+- **PreToolUse**: Blocks edits to `.dev.vars` / `.env` files (use envchain or the encrypted vault instead)
 - **PostToolUse**: Auto-formats `.ts/.tsx` with Biome on every edit
 
 ### Skills
@@ -234,10 +250,10 @@ Secrets are stored via `wrangler secret put`. Local dev uses `.dev.vars` (see `.
 
 ### Subagents (`.claude/agents/`)
 - `security-reviewer` — Parallel security review against invariants + OWASP patterns
-- `adversarial-tester` - Runs adversarial tests, red teaming, pen tests and mutation testing to ensure security and privacy by design (identifies and fixes security vulnerabilities)
+- `adversarial-tester` — Runs adversarial tests, red teaming, pen tests and mutation testing to ensure security and privacy by design
 
 ### Allowed Commands
-Defined in `.claude/settings.json` — includes wrangler, test, lint, and typecheck commands.
+Defined in `.claude/settings.json` — includes test, lint, and typecheck commands.
 
 
 ## Gotchas
@@ -246,8 +262,6 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **pnpm workspaces** — use `pnpm --filter @sentinel/<pkg>` to run commands in specific packages
 - **better-sqlite3** — native module; needs node-gyp build tools (Python, make, C++ compiler)
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
-- **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
-- **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
 - **Biome v2 monorepo globs** — `!dist` only excludes top-level; use `!**/dist` for `packages/*/dist/`
 - **tsup `--dts` in Docker** — Fails with composite project references (TS6307); Dockerfile uses `tsc -b` instead
 - **Docker entrypoint** — `packages/executor/src/entrypoint.ts` is the container startup file; `server.ts` only exports `createApp`
@@ -268,11 +282,10 @@ Completed 2026-03-05. 163 tests, 7 packages, Docker validated. Merged to `main` 
 
 **Packages delivered:** types, crypto (AES-256-GCM vault), policy (94 classification tests), audit (SQLite, credential redaction), executor (Hono :3141, deny-list filtering), agent (Anthropic SDK streaming), cli (TUI + in-process executor).
 
-### Phase 1.5: Container Hardening ✅ (In Progress)
+### Phase 1.5: Container Hardening (Completed)
 
-Pivot from TypeScript policy engine to container-level security controls. 231 tests, 16 test files.
+231 tests, 16 test files. Pivot from TypeScript policy engine to container-level security controls.
 
-**Completed:**
 - [x] Network egress lockdown — Docker `internal: true` network + LLM proxy through executor (`/proxy/llm/*`)
 - [x] Bash hardening — interpreter inline-exec detection (`python3 -c`, `node -e` → "dangerous") + optional firejail sandbox
 - [x] Config freeze — `Object.freeze(structuredClone())` in entrypoint; Invariant #6 now enforced
@@ -283,46 +296,19 @@ Pivot from TypeScript policy engine to container-level security controls. 231 te
 - [x] Content moderation — pattern-based scanner with enforce/warn/off modes; integrated pre/post-execute in router
 - [x] Docker hardening — `USER node`, `dumb-init` entrypoint, explicit `:rw`/`:ro` mounts
 
-**Still TODO (MVP scope):**
-- [ ] Agent proposes, human reviews in batch (PR model)
-- [ ] Set up openclaw - be cautious and read the setup setps in openclaw repo as we will need to modify them to work with sentinel
-- [ ] Google Workspace CLI integration — [`googleworkspace/cli`](https://github.com/googleworkspace/cli) as MCP tool source for executor
+### Hardening (In Progress)
 
-**Deferred to CF deployment:**
-- [ ] Per-agent tool policies — agent self-reports ID; requires JWT auth for enforcement
-- [ ] Sandbox mode enforcement — requires Linux (gVisor/Kata)
-- [ ] Elevated gating — escape-to-host concept, needs real sandbox first
-- [ ] Resume tokens — async approval flows for distributed environments
-- [ ] JWT authentication — agent↔executor auth for networked CF deployment
-- [ ] 2FA integration — multi-factor auth for executor API access
-- [ ] Write-action HITL via ag-ui — replace TUI confirmation with rich ag-ui frontend
-- [ ] CopilotKit — evaluate for agent frontend layer + dedicated chatbot
-- [ ] ag-ui — Agent-UI protocol for streaming agent state to frontends
-- [ ] A2A Protocol — Google's Agent-to-Agent protocol for multi-agent orchestration
-- [ ] UCP integration — unified context protocol via ag-ui + CopilotKit
-- [ ] Add Google Model Armor + OpenAI Content Moderation API to executor safety pipeline
-- [ ] OWASP Top 10 / ASVS L2 / NIST AI RMF audits
-- [ ] CWE-77/78 hardening — command injection coverage beyond bash parser
-- [ ] CF Workers security checklist — see `docs/server-hardening.md`
-- [ ] Replit-style SAST integration — see `docs/server-hardening.md`
+See "Next Step" section above for the concrete TODO list. Threat model: protect local Mac Mini (API keys, files, Google Workspace).
 
-### Phase 2: CF Workers Deployment (Future)
+### Backlog
 
-Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. See `sentinel/` directory and `docs/sentinel-hermes-addendum.md` for full spec.
-
-#### Pre-CF Gate (must pass before CF migration)
-- [ ] Per-agent tool policies — allow/deny lists keyed by agent ID
-- [ ] Red team exercise — adversarial testing against all 6 security invariants
-- [ ] Adversarial testing — prompt injection, manifest forgery, policy bypass attempts
-- [ ] Mutation testing — verify test suite catches injected faults in policy/executor/credential-filter
-- [ ] Security scan — automated vulnerability scanning (dependencies + code)
-- [ ] Penetration test — post-scan, manual pen test of executor API surface and agent↔executor trust boundary
-- [ ] SAST scan (Semgrep) — static analysis with Replit-curated ruleset + custom Sentinel rules
-
-#### Backlog
-- [ ] sqlite-vec integration design (paused) — embedding model, vec0 schema, hybrid FTS5+vec0 queries
+- [ ] sqlite-vec integration design — embedding model, vec0 schema, hybrid FTS5+vec0 queries
 - [ ] Claude-mem setup (modify for security)
 - [ ] Plano model routing — GPT latest + fallbacks to Claude Opus, Gemini Flash Lite 3.1; reference [Claude chat 1](https://claude.ai/share/d7e9dbba-dec4-4f28-a3b7-b9920b76bd10), [Claude chat 2](https://claude.ai/share/c67fb5e7-eb4b-4356-be0e-d7ce66dd359c), [OpenAI model docs](https://developers.openai.com/api/docs/guides/latest-model)
-- [ ] CopilotKit integration; dedicated chatbot use case + AI learning prototype; ag-ui evaluation for MCP app integration
+- [ ] CopilotKit integration — dedicated chatbot use case + AI learning prototype; ag-ui evaluation for MCP app integration; A2A for multi-agent orchestration
+- [ ] Write-action HITL via ag-ui — replace TUI confirmation with rich ag-ui frontend
+- [ ] UCP integration — unified context protocol via ag-ui + CopilotKit
+- [ ] Google Model Armor — add to executor content moderation pipeline
+- [ ] OWASP Top 10 review — security audit of executor API surface
 - [ ] Research: Reddit security warning, ClawMetry review
 - [ ] Claude Code integrations and heartbeats for coding tasks via notes
