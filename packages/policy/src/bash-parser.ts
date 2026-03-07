@@ -103,6 +103,19 @@ function classifySingleCommand(command: string): ActionCategory {
 	if (hasSensitivePath(trimmed)) return "dangerous";
 	if (hasSubshell(trimmed)) return "dangerous";
 
+	// Detect interpreter inline execution (arbitrary code)
+	const INTERPRETER_EXEC_PATTERNS = [
+		/^python3?\s+-c\b/,
+		/^node\s+-e\b/,
+		/^ruby\s+-e\b/,
+		/^perl\s+-e\b/,
+		/^lua\s+-e\b/,
+	];
+
+	for (const pattern of INTERPRETER_EXEC_PATTERNS) {
+		if (pattern.test(trimmed)) return "dangerous";
+	}
+
 	// Extract the first word(s) for command matching
 	const words = trimmed.split(/\s+/);
 	const firstWord = words[0];

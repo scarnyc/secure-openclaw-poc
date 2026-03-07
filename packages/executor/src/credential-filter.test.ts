@@ -52,6 +52,27 @@ describe("filterCredentials", () => {
 		expect(filtered.output).not.toContain("xoxb-");
 	});
 
+	it("strips Gemini API keys from output", () => {
+		const result = makeResult("key: AIzaSyDaGmWKa4JsXZ7RGmKQv_abcdefghijklmnop");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).not.toContain("AIzaSyD");
+		expect(filtered.output).toContain("[REDACTED]");
+	});
+
+	it("strips database connection strings from output", () => {
+		const result = makeResult("db: postgres://user:pass@host:5432/mydb");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).not.toContain("postgres://");
+		expect(filtered.output).toContain("[REDACTED]");
+	});
+
+	it("strips MongoDB connection strings from output", () => {
+		const result = makeResult("uri: mongodb+srv://admin:secret@cluster.example.com/db");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).not.toContain("mongodb+srv://");
+		expect(filtered.output).toContain("[REDACTED]");
+	});
+
 	it("strips credentials from error field too", () => {
 		const result = makeResult(undefined, "Failed: sk-ant-abc123-secretkey999");
 		const filtered = filterCredentials(result);

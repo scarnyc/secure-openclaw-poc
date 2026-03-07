@@ -4,9 +4,10 @@ import { getDefaultConfig } from "@sentinel/policy";
 import { createApp } from "./server.js";
 import { createToolRegistry } from "./tools/index.js";
 
-const config = getDefaultConfig();
-config.auditLogPath = process.env.SENTINEL_AUDIT_PATH ?? "/app/data/audit.db";
-config.vaultPath = process.env.SENTINEL_VAULT_PATH ?? "/app/data/vault.enc";
+const mutableConfig = getDefaultConfig();
+mutableConfig.auditLogPath = process.env.SENTINEL_AUDIT_PATH ?? "/app/data/audit.db";
+mutableConfig.vaultPath = process.env.SENTINEL_VAULT_PATH ?? "/app/data/vault.enc";
+const config = Object.freeze(structuredClone(mutableConfig));
 
 const auditLogger = new AuditLogger(config.auditLogPath);
 const registry = createToolRegistry();

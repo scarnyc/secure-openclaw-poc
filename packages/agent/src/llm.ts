@@ -24,8 +24,8 @@ export class LLMClient {
 	private client: Anthropic;
 	private model: string;
 
-	constructor(apiKey: string, model?: string) {
-		this.client = new Anthropic({ apiKey });
+	constructor(apiKey: string, model?: string, baseURL?: string) {
+		this.client = new Anthropic({ apiKey, baseURL });
 		this.model = model ?? DEFAULT_MODEL;
 	}
 

@@ -5,6 +5,7 @@ export function buildManifest(
 	toolName: string,
 	parameters: Record<string, unknown>,
 	sessionId: string,
+	agentId: string,
 ): ActionManifest {
 	return {
 		id: randomUUID(),
@@ -12,5 +13,6 @@ export function buildManifest(
 		tool: toolName,
 		parameters,
 		sessionId,
+		agentId,
 	};
 }

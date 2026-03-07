@@ -2,6 +2,7 @@ import type { AuditLogger } from "@sentinel/audit";
 import type { ActionManifest, AgentCard, PolicyDecision, SentinelConfig } from "@sentinel/types";
 import { Hono } from "hono";
 import { z } from "zod";
+import { handleLlmProxy } from "./llm-proxy.js";
 import { type ConfirmFn, handleExecute, ManifestValidationError } from "./router.js";
 import type { ToolRegistry } from "./tools/registry.js";
 
@@ -54,6 +55,8 @@ export function createApp(
 	app.get("/tools", (c) => {
 		return c.json(registry.list());
 	});
+
+	app.all("/proxy/llm/*", handleLlmProxy);
 
 	app.post("/execute", async (c) => {
 		try {

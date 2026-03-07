@@ -6,10 +6,16 @@ services:
     ports:
       - "127.0.0.1:3141:3141"
     volumes:
-      - ./data:/app/data
+      # Workspace is read-only — executor cannot modify source code
       - .:/workspace:ro
+      # Data directory is writable — audit logs, vault, runtime state
+      - ./data:/app/data:rw
+    environment:
+      - SENTINEL_DOCKER=true
     networks:
-      - sentinel-net
+      # Executor joins both networks: internal for agent comms, external for LLM APIs
+      - sentinel-internal
+      - sentinel-external
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:3141/health"]
       interval: 5s
@@ -22,13 +28,18 @@ services:
       target: agent
     environment:
       - EXECUTOR_URL=http://executor:3141
-      - ANTHROPIC_API_KEY
+      # Route LLM calls through executor proxy — agent never holds API keys
+      - ANTHROPIC_BASE_URL=http://executor:3141/proxy/llm
     networks:
-      - sentinel-net
+      # Agent only on internal network — no direct internet access
+      - sentinel-internal
     depends_on:
       executor:
         condition: service_healthy
 
 networks:
-  sentinel-net:
+  sentinel-internal:
+    driver: bridge
+    internal: true
+  sentinel-external:
     driver: bridge

@@ -10,6 +10,7 @@ function makeManifest(tool: string, parameters: Record<string, unknown> = {}): A
 		tool,
 		parameters,
 		sessionId: "test-session",
+		agentId: "test-agent",
 	};
 }
 

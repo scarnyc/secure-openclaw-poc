@@ -10,6 +10,7 @@ import type {
 } from "@sentinel/types";
 import { ActionManifestSchema } from "@sentinel/types";
 import { filterCredentials } from "./credential-filter.js";
+import { moderate } from "./moderation/scanner.js";
 import type { ToolRegistry } from "./tools/registry.js";
 
 export type ConfirmFn = (manifest: ActionManifest, decision: PolicyDecision) => Promise<boolean>;
@@ -46,6 +47,7 @@ export async function handleExecute(
 		timestamp: new Date().toISOString(),
 		manifestId: manifest.id,
 		sessionId: manifest.sessionId,
+		agentId: manifest.agentId,
 		tool: manifest.tool,
 		category: decision.category,
 		decision: decision.action,
@@ -83,7 +85,24 @@ export async function handleExecute(
 		}
 	}
 
-	// 4. Execute
+	// 4. Pre-execute moderation: scan request parameters
+	const paramText = summarizeParams(manifest.parameters);
+	const preModeration = moderate(paramText);
+	if (preModeration.blocked) {
+		auditLogger.log({
+			...auditBase,
+			result: "blocked_by_policy",
+			duration_ms: 0,
+		});
+		return {
+			manifestId: manifest.id,
+			success: false,
+			error: "Blocked by content moderation",
+			duration_ms: 0,
+		};
+	}
+
+	// 5. Execute
 	const handler = registry.get(manifest.tool);
 	if (!handler) {
 		auditLogger.log({
@@ -101,10 +120,28 @@ export async function handleExecute(
 
 	const rawResult = await handler(manifest.parameters, manifest.id);
 
-	// 5. Filter credentials from tool output before it reaches the agent
+	// 6. Filter credentials from tool output before it reaches the agent
 	const result = filterCredentials(rawResult);
 
-	// 6. Audit
+	// 7. Post-execute moderation: scan tool output
+	if (result.output) {
+		const postModeration = moderate(result.output);
+		if (postModeration.blocked) {
+			auditLogger.log({
+				...auditBase,
+				result: "blocked_by_policy",
+				duration_ms: result.duration_ms,
+			});
+			return {
+				manifestId: manifest.id,
+				success: false,
+				error: "Output blocked by content moderation",
+				duration_ms: result.duration_ms,
+			};
+		}
+	}
+
+	// 8. Audit
 	auditLogger.log({
 		...auditBase,
 		result: result.success ? "success" : "failure",

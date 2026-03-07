@@ -9,12 +9,19 @@ export const ActionCategorySchema = z.enum(["read", "write", "dangerous"]);
 export type ActionCategory = z.infer<typeof ActionCategorySchema>;
 
 export const ActionManifestSchema = z.object({
-	id: z.string().uuid().default(() => crypto.randomUUID()),
-	timestamp: z.string().datetime().default(() => new Date().toISOString()),
+	id: z
+		.string()
+		.uuid()
+		.default(() => crypto.randomUUID()),
+	timestamp: z
+		.string()
+		.datetime()
+		.default(() => new Date().toISOString()),
 	tool: z.string().min(1),
 	parameters: z.record(z.unknown()),
 	category: ActionCategorySchema.optional(),
 	sessionId: z.string().min(1),
+	agentId: z.string().min(1),
 });
 export type ActionManifest = z.infer<typeof ActionManifestSchema>;
 

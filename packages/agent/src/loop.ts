@@ -10,7 +10,9 @@ export interface AgentLoopConfig {
 	executorUrl: string;
 	apiKey: string;
 	model?: string;
+	llmBaseUrl?: string;
 	sessionId: string;
+	agentId: string;
 }
 
 export async function agentLoop(config: AgentLoopConfig): Promise<void> {
@@ -25,7 +27,7 @@ export async function agentLoop(config: AgentLoopConfig): Promise<void> {
 	const systemPrompt = buildSystemPrompt(toolEntries);
 	const anthropicTools = toAnthropicTools(toolEntries);
 
-	const llm = new LLMClient(config.apiKey, config.model);
+	const llm = new LLMClient(config.apiKey, config.model, config.llmBaseUrl);
 	const context = new ConversationContext();
 
 	const rl = createInterface({ input: process.stdin, output: process.stdout });
@@ -94,7 +96,7 @@ export async function agentLoop(config: AgentLoopConfig): Promise<void> {
 				if (pendingToolUses.length > 0) {
 					process.stdout.write("\n");
 					for (const tu of pendingToolUses) {
-						const manifest = buildManifest(tu.name, tu.input, config.sessionId);
+						const manifest = buildManifest(tu.name, tu.input, config.sessionId, config.agentId);
 						const result = await executor.execute(manifest);
 						context.addToolResult(tu.id, result);
 					}

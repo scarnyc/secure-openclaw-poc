@@ -26,6 +26,7 @@ function makeEntry(overrides: Partial<AuditEntry> = {}): AuditEntry {
 		timestamp: new Date().toISOString(),
 		manifestId: crypto.randomUUID(),
 		sessionId: "session-1",
+		agentId: "test-agent",
 		tool: "bash",
 		category: "dangerous",
 		decision: "confirm",

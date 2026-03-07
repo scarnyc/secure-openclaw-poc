@@ -67,12 +67,14 @@ export async function chatCommand(config: SentinelConfig, _dataDir: string): Pro
 	process.on("SIGINT", shutdown);
 	process.on("SIGTERM", shutdown);
 
+	const agentId = `cli-${sessionId.slice(0, 8)}`;
 	try {
 		await agentLoop({
 			executorUrl,
 			apiKey,
 			model: config.llm.model,
 			sessionId,
+			agentId,
 		});
 	} catch (error) {
 		if (error instanceof Error && error.message.includes("stdin closed")) {

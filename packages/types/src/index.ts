@@ -26,6 +26,10 @@ export {
 	ToolRegistryEntrySchema,
 } from "./config.js";
 export {
+	CREDENTIAL_PATTERNS,
+	redactAllCredentials,
+} from "./credential-patterns.js";
+export {
 	type ActionCategory,
 	ActionCategorySchema,
 	type ActionManifest,

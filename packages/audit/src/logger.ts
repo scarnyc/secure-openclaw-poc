@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
   timestamp TEXT NOT NULL,
   manifest_id TEXT NOT NULL,
   session_id TEXT NOT NULL,
+  agent_id TEXT NOT NULL DEFAULT 'unknown',
   tool TEXT NOT NULL,
   category TEXT NOT NULL,
   decision TEXT NOT NULL,
@@ -25,14 +26,15 @@ const CREATE_INDEX_TIMESTAMP =
 const CREATE_INDEX_TOOL = "CREATE INDEX IF NOT EXISTS idx_audit_tool ON audit_log(tool)";
 
 const INSERT_SQL = `
-INSERT INTO audit_log (id, timestamp, manifest_id, session_id, tool, category, decision, parameters_summary, result, duration_ms)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+INSERT INTO audit_log (id, timestamp, manifest_id, session_id, agent_id, tool, category, decision, parameters_summary, result, duration_ms)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
 interface AuditRow {
 	id: string;
 	timestamp: string;
 	manifest_id: string;
 	session_id: string;
+	agent_id: string;
 	tool: string;
 	category: string;
 	decision: string;
@@ -48,6 +50,7 @@ function rowToEntry(row: AuditRow): AuditEntry {
 		timestamp: row.timestamp,
 		manifestId: row.manifest_id,
 		sessionId: row.session_id,
+		agentId: row.agent_id,
 		tool: row.tool,
 		category: row.category as AuditEntry["category"],
 		decision: row.decision as AuditEntry["decision"],
@@ -81,6 +84,7 @@ export class AuditLogger {
 			entry.timestamp,
 			entry.manifestId,
 			entry.sessionId,
+			entry.agentId,
 			entry.tool,
 			entry.category,
 			entry.decision,

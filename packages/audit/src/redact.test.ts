@@ -37,6 +37,34 @@ describe("redactCredentials", () => {
 		expect(redactCredentials(input)).toBe("Authorization: [REDACTED]");
 	});
 
+	it("redacts Gemini API keys (AIza*)", () => {
+		const input = "key: AIzaSyDaGmWKa4JsXZ7RGmKQv_abcdefghijklmnop";
+		const result = redactCredentials(input);
+		expect(result).not.toContain("AIzaSyD");
+		expect(result).toContain("[REDACTED]");
+	});
+
+	it("redacts database connection strings", () => {
+		const input = "db: postgres://user:pass@host:5432/mydb";
+		const result = redactCredentials(input);
+		expect(result).not.toContain("postgres://");
+		expect(result).toContain("[REDACTED]");
+	});
+
+	it("redacts MongoDB+SRV connection strings", () => {
+		const input = "uri: mongodb+srv://admin:secret@cluster.example.com/db";
+		const result = redactCredentials(input);
+		expect(result).not.toContain("mongodb+srv://");
+		expect(result).toContain("[REDACTED]");
+	});
+
+	it("redacts MySQL connection strings", () => {
+		const input = "dsn: mysql://root:password@localhost/app";
+		const result = redactCredentials(input);
+		expect(result).not.toContain("mysql://");
+		expect(result).toContain("[REDACTED]");
+	});
+
 	it("redacts long base64-like strings (40+ chars)", () => {
 		const base64 = "A".repeat(50);
 		const input = `data: ${base64} end`;

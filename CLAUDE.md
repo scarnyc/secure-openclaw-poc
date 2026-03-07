@@ -1,12 +1,6 @@
 # Sentinel — Secure Agent Runtime
 
-Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Built as a local-first MVP, with Cloudflare Workers deployment planned for Phase 2.
-
-## Next Step
-
-**Execute Phase 1.5 implementation plan** — run `/superpowers:execute-plan` to begin:
-- Design: [`docs/plans/2026-03-05-policy-permissions-redesign.md`](docs/plans/2026-03-05-policy-permissions-redesign.md)
-- Implementation: [`docs/plans/2026-03-05-policy-permissions-implementation.md`](docs/plans/2026-03-05-policy-permissions-implementation.md) (10 tasks, TDD, ~80 new tests)
+Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Built as a local-first MVP, with optional deployment on Cloudflare Workers once proven.
 
 
 ## Quick Commands
@@ -40,8 +34,6 @@ pnpm install
 
 | Document | Purpose |
 |----------|---------|
-| `docs/plans/2026-03-05-policy-permissions-redesign.md` | Phase 1.5 design doc — policy document schema, classify() flow, workspace enforcement, testing strategy |
-| `docs/plans/2026-03-05-policy-permissions-implementation.md` | Phase 1.5 implementation plan — 10 TDD tasks, exact file paths, test code, commit points |
 | `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping, CF Workers checklist, Replit agent security lessons, and security framework references |
 | `docs/sentinel-hermes-addendum.md` | Hermes Agent feature additions [H1]-[H4] (ComputeBackend, bash classifier, session scoping, skill evaluation) |
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
@@ -57,24 +49,32 @@ pnpm install
 ┌─────────────────────────┐         ┌──────────────────────────────┐
 │     AGENT PROCESS        │  HTTP   │      EXECUTOR PROCESS         │
 │     (untrusted, Docker)  │◄──────►│      (trusted, Docker)        │
-│                          │ :3141  │                               │
-│  - LLM API calls         │        │  - Credential Vault           │
-│  - Reasoning / planning  │        │  - Tool execution             │
-│  - Tool call generation  │        │  - Action classification      │
-│  - Context management    │        │  - Confirmation routing       │
-│                          │        │  - Audit logging (SQLite)     │
-│  NO credentials          │        │  - MCP tool proxy             │
-│  NO direct tool exec     │        │  Decrypts creds at exec time  │
+│     internal network     │ :3141  │                               │
+│     NO internet access   │        │  - Credential Vault           │
+│                          │        │  - Tool execution             │
+│  - Reasoning / planning  │        │  - Action classification      │
+│  - Tool call generation  │        │  - Confirmation routing       │
+│  - Context management    │        │  - Audit logging (SQLite)     │
+│                          │        │  - LLM proxy (/proxy/llm/*)  │
+│  NO credentials          │        │  - Content moderation         │
+│  NO direct tool exec     │        │  - MCP tool proxy             │
+│  NO direct internet      │        │  Decrypts creds at exec time  │
 └─────────────────────────┘         └──────────────────────────────┘
-                                              │
-                                    ┌─────────▼──────────┐
-                                    │  CONFIRMATION TUI   │
-                                    │  (host terminal)    │
-                                    │  Shows ACTUAL params │
-                                    └─────────────────────┘
+         │ LLM calls via                      │         │
+         │ /proxy/llm/*                       │    ┌────▼─────────────┐
+         └────────────────────────────────────┘    │ LLM APIs         │
+                                    │              │ (anthropic,       │
+                                    │              │  openai, gemini)  │
+                                    │              └──────────────────┘
+                                    │
+                          ┌─────────▼──────────┐
+                          │  CONFIRMATION TUI   │
+                          │  (host terminal)    │
+                          │  Shows ACTUAL params │
+                          └─────────────────────┘
 ```
 
-Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, optionally confirms with user, executes, audits, returns sanitized results. Confirmation TUI runs on host (trust anchor), never inside Docker.
+Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. Confirmation TUI runs on host (trust anchor), never inside Docker.
 
 ### Phase 2: Cloudflare Workers Deployment (Future)
 
@@ -124,12 +124,12 @@ These 6 rules are **non-negotiable**. Every PR must maintain them. Each has a re
 
 | # | Invariant | Required Test |
 |---|-----------|--------------|
-| 1 | **No credentials in tool responses** — `credential-filter.ts` strips secrets before output reaches the agent | Assert: seeded API keys/tokens are removed |
-| 2 | **All tool calls audited** — `onBeforeToolCall` writes immutable D1 record before execution | Assert: D1 audit rows match tool call count 1:1 |
+| 1 | **No credentials in tool responses** — unified `credential-patterns.ts` strips secrets (Anthropic, OpenAI, Gemini, GitHub, Slack, AWS, DB strings) before output reaches agent | Assert: seeded API keys/tokens are removed |
+| 2 | **All tool calls audited** — audit logger writes SQLite record with `agentId` before execution | Assert: audit rows match tool call count 1:1, include agentId |
 | 3 | **Blocked tool categories enforced** — fs write, network egress, code exec denied unless allowlisted | Assert: blocked tool call rejected with correct error code |
 | 4 | **Memory size caps enforced** — claude-mem entries capped at 10KB each, 100MB total | Assert: oversized observation truncated or rejected |
 | 5 | **No credential storage in memory** — entries scanned for credential patterns before SQLite write | Assert: API key pattern in memory entry is rejected |
-| 6 | **Policy changes require restart** — KV policy read at startup, no hot-reload | Assert: post-startup KV mutation has no effect |
+| 6 | **Policy changes require restart** — config frozen via `Object.freeze(structuredClone())` at startup | Assert: frozen config mutation throws TypeError |
 
 
 ## Conventions
@@ -140,6 +140,22 @@ These 6 rules are **non-negotiable**. Every PR must maintain them. Each has a re
 - **tsup** for package builds; coexists with wrangler for CF Worker bundling (Phase 2)
 - **Never** include credential values in error messages, even truncated
 - **Biome** for linting and formatting (not ESLint/Prettier/OXLint)
+
+### Credential Patterns
+- **Single source of truth** in `packages/types/src/credential-patterns.ts`
+- Both `executor/credential-filter.ts` and `audit/redact.ts` import from types
+- Add new patterns here only — never maintain separate pattern lists
+
+### Bash Sandboxing
+- **Interpreter inline-exec** (`python3 -c`, `node -e`, etc.) classified as "dangerous" — always requires confirmation
+- **firejail** wrapping when `SENTINEL_BASH_SANDBOX=firejail` — `--net=none --private` for defense-in-depth
+- firejail is Linux-only; local Mac dev falls back to unsandboxed execution
+
+### Content Moderation
+- **Mode**: `SENTINEL_MODERATION_MODE=enforce|warn|off` (default: off in local dev)
+- Scanner in `packages/executor/src/moderation/scanner.ts`
+- Pre-execute: scans request parameters; post-execute: scans tool output
+- `enforce`: blocked content returns generic error; `warn`: logged but not blocked
 
 ### Testing
 - **Vitest** with V8 coverage; tests colocated as `*.test.ts` next to source
@@ -190,45 +206,15 @@ Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation
 - **Use cases**: Semantic memory retrieval, skill matching by embedding similarity, credential pattern anomaly detection
 - **Integration**: Loads as extension into existing better-sqlite3 instance; no new infrastructure
 
-### Vector DB: Zvec (Post-MVP, Wave 6+)
-- **Choice**: [Zvec](https://github.com/alibaba/zvec) — C++ embedded vector DB with Node.js bindings
-- **When**: After ComputeBackend ships; runs inside OpenSandbox containers on Hetzner
-- **Why defer**: Native C++ dep is premature for local-first MVP; hybrid dense+sparse search valuable at scale
-
-### Container Runtime: OpenSandbox (Post-MVP, Wave 6+)
-- **Choice**: [OpenSandbox](https://github.com/alibaba/OpenSandbox) — self-hosted sandbox platform (Docker/K8s)
-- **Replaces**: CF Containers as `DockerBackend` target
-- **Why**: gVisor/Kata/Firecracker isolation > CF process-level; per-sandbox egress policies; built-in Playwright
-- **When**: After `ComputeBackend` interface is stable (Wave 3), evaluated for Wave 6 integration
-
-### Open Design Work (sqlite-vec)
-- **Status**: Paused — resume before Wave 3 implementation
-- **Remaining decisions**: Embedding model choice (local vs API), `vec0` table schema, hybrid FTS5+vec0 query strategy, embedding generation pipeline at observation write time
-
-### Evaluated & Rejected
-- **LEANN** — Python-only, LlamaIndex dependency; wrong ecosystem for TypeScript project
-- **Cloudflare Vectorize** — Network latency for local agent loop; can't send credential-adjacent content to cloud for embedding
-- **Zvec in MVP** — C++ native dep adds build complexity for v0.2.0 software; sqlite-vec covers MVP needs
-
-### Evaluation Queue
-- **CopilotKit** — Generative UI framework for AI-native apps; evaluate for agent frontend layer
-  - Org: https://github.com/CopilotKit
-  - Key repos: `generative-ui`, `deep-agents-demo`, `with-mcp-apps`
-- **ag-ui** — Agent-UI protocol for streaming agent state to frontends; evaluate for MCP app integration
-  - Repo: https://github.com/ag-ui-protocol/ag-ui
-
 
 ## Environment Variables
 
 | Variable | Scope | Description |
 |----------|-------|-------------|
-| `ANTHROPIC_API_KEY` | Container | AI provider key (required) |
+| `ANTHROPIC_API_KEY` | Container | CLAUDE AI provider key (required) |
+| `OPENAI_API_KEY` | Container | GPT AI provider key (required) |
+| `GEMINI_API_KEY` | Container | GOOGLE AI provider key (required) |
 | `MOLTBOT_GATEWAY_TOKEN` | Worker | Gateway access protection |
-| `CF_ACCESS_TEAM_DOMAIN` | Worker | Cloudflare Access auth domain |
-| `CF_ACCESS_AUD` | Worker | Cloudflare Access audience tag |
-| `R2_ACCESS_KEY_ID` | Worker | R2 persistence credentials |
-| `R2_SECRET_ACCESS_KEY` | Worker | R2 persistence credentials |
-| `CF_ACCOUNT_ID` | Worker | Cloudflare account ID |
 | `SENTINEL_POLICY_VERSION` | Container | Policy version string (read at startup) |
 | `SENTINEL_AUDIT_ENABLED` | Container | Enable/disable D1 audit logging |
 | `CLAUDE_MEM_DATA_DIR` | Container | claude-mem SQLite path override |
@@ -248,10 +234,7 @@ Secrets are stored via `wrangler secret put`. Local dev uses `.dev.vars` (see `.
 
 ### Subagents (`.claude/agents/`)
 - `security-reviewer` — Parallel security review against invariants + OWASP patterns
-
-### MCP Servers (`.claude/.mcp.json`)
-- `cloudflare-bindings` — Query D1/KV/R2 directly (OAuth on first use)
-- `cloudflare-observability` — Tail Worker logs during dev
+- `adversarial-tester` - Runs adversarial tests, red teaming, pen tests and mutation testing to ensure security and privacy by design (identifies and fixes security vulnerabilities)
 
 ### Allowed Commands
 Defined in `.claude/settings.json` — includes wrangler, test, lint, and typecheck commands.
@@ -262,7 +245,6 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **Biome v2, not v1** — config schema changed significantly; use `biome.json` with `$schema` v2.4.6+
 - **pnpm workspaces** — use `pnpm --filter @sentinel/<pkg>` to run commands in specific packages
 - **better-sqlite3** — native module; needs node-gyp build tools (Python, make, C++ compiler)
-- **No D1/KV in MVP** — D1 and KV are Phase 2 (CF Workers); MVP uses local SQLite + encrypted files
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
 - **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
@@ -271,6 +253,11 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **Docker entrypoint** — `packages/executor/src/entrypoint.ts` is the container startup file; `server.ts` only exports `createApp`
 - **`noImplicitAnyLet`** — Biome catches `let x;` even when TS allows it; always annotate: `let x: Type;`
 - **Executor concurrency** — OpenClaw can spawn parallel agent instances; executor `:3141` must handle concurrent `/execute` POST requests with session-scoped isolation (no shared mutable state between requests)
+- **Docker `internal: true`** — agent container cannot reach internet; all LLM calls go through executor's `/proxy/llm/*` endpoint
+- **`ANTHROPIC_BASE_URL`** — must be set in agent container to `http://executor:3141/proxy/llm` to route through proxy
+- **firejail is Linux-only** — local Mac dev falls back to unsandboxed bash execution; firejail wrapping only active when `SENTINEL_BASH_SANDBOX=firejail`
+- **`SENTINEL_DOCKER=true`** — enables write-file path restriction to `/app/data/`; set in executor container env
+- **Archived plans** — `docs/plans/archived/` contains superseded Phase 1.5 design docs (TypeScript policy engine approach)
 
 
 ## Build Progress
@@ -281,33 +268,50 @@ Completed 2026-03-05. 163 tests, 7 packages, Docker validated. Merged to `main` 
 
 **Packages delivered:** types, crypto (AES-256-GCM vault), policy (94 classification tests), audit (SQLite, credential redaction), executor (Hono :3141, deny-list filtering), agent (Anthropic SDK streaming), cli (TUI + in-process executor).
 
-### Phase 1.5: Policy & Permissions Redesign (In Progress)
+### Phase 1.5: Container Hardening ✅ (In Progress)
 
-Sentinel absorbs OpenClaw's security concepts; OpenClaw runs permissive with Sentinel as sole trust boundary. Design: Approach B (separate policy document — `config/policy.json` with own Zod schema, loaded at startup).
+Pivot from TypeScript policy engine to container-level security controls. 231 tests, 16 test files.
 
-**MVP scope (protect local Mac Mini):**
-- [ ] Workspace scoping — per-agent filesystem containment (allow-list model replaces deny-list)
-- [ ] Per-agent tool policies — allow/deny lists keyed by agent ID
-- [ ] Tool groups — ergonomic grouping (`group:fs`, `group:runtime`, etc.)
-- [ ] Exec approval allowlists — pattern-based auto-approve to prevent confirmation fatigue
+**Completed:**
+- [x] Network egress lockdown — Docker `internal: true` network + LLM proxy through executor (`/proxy/llm/*`)
+- [x] Bash hardening — interpreter inline-exec detection (`python3 -c`, `node -e` → "dangerous") + optional firejail sandbox
+- [x] Config freeze — `Object.freeze(structuredClone())` in entrypoint; Invariant #6 now enforced
+- [x] Unified credential filter — single source of truth in `packages/types/src/credential-patterns.ts`; Gemini (`AIza`), DB connection strings, expanded GitHub/Slack patterns
+- [x] GEMINI_ env stripping — added to `STRIPPED_ENV_PREFIXES` in bash executor
+- [x] agentId in manifests — required field for audit trail; all manifests include `agentId`
+- [x] Workspace read-only mounts — Docker bind mounts + `/app/data/` write prefix check when `SENTINEL_DOCKER=true`
+- [x] Content moderation — pattern-based scanner with enforce/warn/off modes; integrated pre/post-execute in router
+- [x] Docker hardening — `USER node`, `dumb-init` entrypoint, explicit `:rw`/`:ro` mounts
+
+**Still TODO (MVP scope):**
+- [ ] Agent proposes, human reviews in batch (PR model)
+- [ ] Set up openclaw - be cautious and read the setup setps in openclaw repo as we will need to modify them to work with sentinel
+- [ ] Google Workspace CLI integration — [`googleworkspace/cli`](https://github.com/googleworkspace/cli) as MCP tool source for executor
 
 **Deferred to CF deployment:**
-- [ ] Sandbox mode enforcement — schema defined in MVP, enforcement requires Linux (gVisor/Kata)
+- [ ] Per-agent tool policies — agent self-reports ID; requires JWT auth for enforcement
+- [ ] Sandbox mode enforcement — requires Linux (gVisor/Kata)
 - [ ] Elevated gating — escape-to-host concept, needs real sandbox first
 - [ ] Resume tokens — async approval flows for distributed environments
-- [ ] JWT authentication — agent↔executor auth for networked CF deployment (local MVP uses localhost trust)
-- [ ] OWASP Top 10 validation — systematic audit of executor API against current OWASP Top 10
-- [ ] OWASP ASVS L2 — Application Security Verification Standard level 2 (standard for security-critical apps)
-- [ ] NIST AI RMF alignment — AI Risk Management Framework review for agent-specific threat categories
-- [ ] CWE-77/78 hardening — command injection coverage beyond bash parser (OS command + argument injection)
-- [ ] CF Workers security checklist — see `docs/server-hardening.md` §CF Workers Security Checklist (W1-W7)
-- [ ] Replit-style SAST integration — see `docs/server-hardening.md` §Replit Agent Security Lessons (R1-R5)
+- [ ] JWT authentication — agent↔executor auth for networked CF deployment
+- [ ] 2FA integration — multi-factor auth for executor API access
+- [ ] Write-action HITL via ag-ui — replace TUI confirmation with rich ag-ui frontend
+- [ ] CopilotKit — evaluate for agent frontend layer + dedicated chatbot
+- [ ] ag-ui — Agent-UI protocol for streaming agent state to frontends
+- [ ] A2A Protocol — Google's Agent-to-Agent protocol for multi-agent orchestration
+- [ ] UCP integration — unified context protocol via ag-ui + CopilotKit
+- [ ] Add Google Model Armor + OpenAI Content Moderation API to executor safety pipeline
+- [ ] OWASP Top 10 / ASVS L2 / NIST AI RMF audits
+- [ ] CWE-77/78 hardening — command injection coverage beyond bash parser
+- [ ] CF Workers security checklist — see `docs/server-hardening.md`
+- [ ] Replit-style SAST integration — see `docs/server-hardening.md`
 
 ### Phase 2: CF Workers Deployment (Future)
 
 Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. See `sentinel/` directory and `docs/sentinel-hermes-addendum.md` for full spec.
 
 #### Pre-CF Gate (must pass before CF migration)
+- [ ] Per-agent tool policies — allow/deny lists keyed by agent ID
 - [ ] Red team exercise — adversarial testing against all 6 security invariants
 - [ ] Adversarial testing — prompt injection, manifest forgery, policy bypass attempts
 - [ ] Mutation testing — verify test suite catches injected faults in policy/executor/credential-filter
@@ -317,7 +321,8 @@ Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. 
 
 #### Backlog
 - [ ] sqlite-vec integration design (paused) — embedding model, vec0 schema, hybrid FTS5+vec0 queries
-- [ ] CF Workers migration — D1 for audit, KV for policy cache, Wrangler setup
-- [ ] Plano model routing — AI-native proxy for intelligent model selection
-- [ ] Research: CopilotKit / ag-ui evaluation for agent frontend layer
-- [ ] Research: copy Claude Desktop Sentinel chats, Reddit security warning, ClawMetry review
+- [ ] Claude-mem setup (modify for security)
+- [ ] Plano model routing — GPT latest + fallbacks to Claude Opus, Gemini Flash Lite 3.1; reference [Claude chat 1](https://claude.ai/share/d7e9dbba-dec4-4f28-a3b7-b9920b76bd10), [Claude chat 2](https://claude.ai/share/c67fb5e7-eb4b-4356-be0e-d7ce66dd359c), [OpenAI model docs](https://developers.openai.com/api/docs/guides/latest-model)
+- [ ] CopilotKit integration; dedicated chatbot use case + AI learning prototype; ag-ui evaluation for MCP app integration
+- [ ] Research: Reddit security warning, ClawMetry review
+- [ ] Claude Code integrations and heartbeats for coding tasks via notes

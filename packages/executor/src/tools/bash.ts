@@ -1,5 +1,31 @@
 import type { ToolResult } from "@sentinel/types";
-import { execaCommand } from "execa";
+import { execa, execaCommand } from "execa";
+
+async function detectFirejail(): Promise<boolean> {
+	try {
+		const result = await execaCommand("which firejail", { reject: false });
+		return result.exitCode === 0;
+	} catch {
+		return false;
+	}
+}
+
+let firejailDetection: Promise<boolean> | null = null;
+
+async function isFirejailAvailable(): Promise<boolean> {
+	if (process.env.SENTINEL_BASH_SANDBOX !== "firejail") return false;
+	if (!firejailDetection) {
+		firejailDetection = detectFirejail();
+		firejailDetection.then((available) => {
+			if (!available) {
+				console.warn(
+					"SENTINEL_BASH_SANDBOX=firejail but firejail not found; falling back to unsandboxed execution",
+				);
+			}
+		});
+	}
+	return firejailDetection;
+}
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
@@ -32,7 +58,7 @@ function isDeniedBashCommand(command: string): string | null {
 	return null;
 }
 
-const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_"];
+const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
 const STRIPPED_ENV_KEYS = new Set([
 	"MOLTBOT_GATEWAY_TOKEN",
 	"CF_ACCESS_AUD",
@@ -73,14 +99,27 @@ export async function executeBash(params: BashParams, manifestId: string): Promi
 	const timeout = Math.min(Math.max(params.timeout ?? DEFAULT_TIMEOUT_MS, 1), MAX_TIMEOUT_MS);
 
 	try {
-		const result = await execaCommand(params.command, {
+		const useFirejail = await isFirejailAvailable();
+
+		const execOptions = {
 			cwd: params.cwd ?? process.cwd(),
 			timeout,
-			killSignal: "SIGKILL",
+			killSignal: "SIGKILL" as const,
 			env: stripSensitiveEnv(process.env),
+			extendEnv: false,
 			reject: false,
-			shell: true,
-		});
+		};
+
+		const result = useFirejail
+			? await execa(
+					"firejail",
+					["--net=none", "--private", "--", "sh", "-c", params.command],
+					execOptions,
+				)
+			: await execaCommand(params.command, {
+					...execOptions,
+					shell: true,
+				});
 
 		const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
 

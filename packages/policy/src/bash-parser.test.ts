@@ -154,6 +154,27 @@ describe("classifyBashCommand", () => {
 		});
 	});
 
+	describe("interpreter inline execution", () => {
+		it.each([
+			['python3 -c "import os"', "dangerous"],
+			['python -c "print(1)"', "dangerous"],
+			["node -e \"require('fs').writeFileSync('/tmp/x','y')\"", "dangerous"],
+			['ruby -e "puts 1"', "dangerous"],
+			['perl -e "print 1"', "dangerous"],
+			['lua -e "print(1)"', "dangerous"],
+		])("%s -> %s", (command, expected) => {
+			expect(classifyBashCommand(command)).toBe(expected);
+		});
+
+		it("python3 script.py stays write (not -c)", () => {
+			expect(classifyBashCommand("python3 script.py")).toBe("write");
+		});
+
+		it("node script.js stays write (not -e)", () => {
+			expect(classifyBashCommand("node script.js")).toBe("write");
+		});
+	});
+
 	describe("edge cases", () => {
 		it("empty string is read", () => {
 			expect(classifyBashCommand("")).toBe("read");
