@@ -35,3 +35,6 @@ npm-debug.log*
 # Temp
 tmp/
 .tmp/
+
+# Worktrees
+.worktrees/
