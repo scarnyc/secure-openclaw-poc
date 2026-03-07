@@ -206,19 +206,6 @@ Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation
 - **Use cases**: Semantic memory retrieval, skill matching by embedding similarity, credential pattern anomaly detection
 - **Integration**: Loads as extension into existing better-sqlite3 instance; no new infrastructure
 
-### Vector DB: Zvec (Post-MVP, Wave 6+)
-- **Choice**: [Zvec](https://github.com/alibaba/zvec) — C++ embedded vector DB with Node.js bindings; hybrid dense+sparse search valuable at scale
-
-### Container Runtime: OpenSandbox (Post-MVP, Wave 6+)
-- **Choice**: [OpenSandbox](https://github.com/alibaba/OpenSandbox) — self-hosted sandbox platform (Docker/K8s)
-- **Replaces**: CF Containers as `DockerBackend` target
-- **Why**: gVisor/Kata/Firecracker isolation > CF process-level; per-sandbox egress policies; built-in Playwright
-- **When**: After `ComputeBackend` interface is stable (Wave 3), evaluated for Wave 6 integration
-
-### Open Design Work (sqlite-vec)
-- **Status**: Paused — resume before Wave 3 implementation
-- **Remaining decisions**: Embedding model choice (local vs API), `vec0` table schema, hybrid FTS5+vec0 query strategy, embedding generation pipeline at observation write time
-
 
 ## Environment Variables
 
