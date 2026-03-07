@@ -5,6 +5,7 @@ import type {
 	ActionManifest,
 	AuditEntry,
 	PolicyDecision,
+	PolicyDocument,
 	SentinelConfig,
 	ToolResult,
 } from "@sentinel/types";
@@ -26,6 +27,7 @@ function summarizeParams(params: Record<string, unknown>): string {
 export async function handleExecute(
 	rawManifest: unknown,
 	config: SentinelConfig,
+	policy: Readonly<PolicyDocument>,
 	auditLogger: AuditLogger,
 	registry: ToolRegistry,
 	confirmFn: ConfirmFn,
@@ -38,7 +40,7 @@ export async function handleExecute(
 	const manifest = parsed.data;
 
 	// 2. Classify via policy engine
-	const decision = classify(manifest, config);
+	const decision = classify(manifest, policy, config);
 
 	// 3. Decide
 	const auditBase: Omit<AuditEntry, "result" | "duration_ms"> = {
@@ -47,7 +49,7 @@ export async function handleExecute(
 		manifestId: manifest.id,
 		sessionId: manifest.sessionId,
 		agentId: manifest.agentId,
-		policyVersion: 1, // hardcoded until policy loading in Task 6
+		policyVersion: policy.version,
 		tool: manifest.tool,
 		category: decision.category,
 		decision: decision.action,

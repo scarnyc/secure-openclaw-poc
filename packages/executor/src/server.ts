@@ -1,5 +1,11 @@
 import type { AuditLogger } from "@sentinel/audit";
-import type { ActionManifest, AgentCard, PolicyDecision, SentinelConfig } from "@sentinel/types";
+import type {
+	ActionManifest,
+	AgentCard,
+	PolicyDecision,
+	PolicyDocument,
+	SentinelConfig,
+} from "@sentinel/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { type ConfirmFn, handleExecute, ManifestValidationError } from "./router.js";
@@ -30,6 +36,7 @@ const AGENT_CARD: AgentCard = {
 
 export function createApp(
 	config: SentinelConfig,
+	policy: Readonly<PolicyDocument>,
 	auditLogger: AuditLogger,
 	registry: ToolRegistry,
 ): Hono {
@@ -58,7 +65,7 @@ export function createApp(
 	app.post("/execute", async (c) => {
 		try {
 			const body = await c.req.json();
-			const result = await handleExecute(body, config, auditLogger, registry, confirmFn);
+			const result = await handleExecute(body, config, policy, auditLogger, registry, confirmFn);
 			return c.json(result, result.success ? 200 : 422);
 		} catch (error) {
 			if (error instanceof ManifestValidationError) {

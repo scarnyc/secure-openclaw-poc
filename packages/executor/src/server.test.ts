@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuditLogger } from "@sentinel/audit";
+import { getDefaultPolicy } from "@sentinel/policy";
 import type { ActionManifest, SentinelConfig, ToolResult } from "@sentinel/types";
 import type { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -54,7 +55,7 @@ beforeEach(() => {
 	registry = createToolRegistry();
 
 	// Create app with auto-approve confirmFn (overridden per-test when needed)
-	app = createApp(DEFAULT_CONFIG, auditLogger, registry);
+	app = createApp(DEFAULT_CONFIG, getDefaultPolicy(), auditLogger, registry);
 });
 
 afterEach(() => {

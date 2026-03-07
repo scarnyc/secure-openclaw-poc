@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuditLogger } from "@sentinel/audit";
+import { getDefaultPolicy } from "@sentinel/policy";
 import type { ActionManifest, ToolResult } from "@sentinel/types";
 import type { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -57,7 +58,7 @@ beforeEach(() => {
 	const dbPath = join(tempDir, "audit.db");
 	auditLogger = new AuditLogger(dbPath);
 	registry = createToolRegistry();
-	app = createApp(DEFAULT_CONFIG, auditLogger, registry);
+	app = createApp(DEFAULT_CONFIG, getDefaultPolicy(), auditLogger, registry);
 });
 
 afterEach(() => {
@@ -161,7 +162,7 @@ describe("Security Invariant #6: Policy changes require restart", () => {
 		// creation should not affect already-captured closures that don't
 		// re-read from an external source.
 		const config = { ...DEFAULT_CONFIG, autoApproveReadOps: true };
-		const testApp = createApp(config, auditLogger, registry);
+		const testApp = createApp(config, getDefaultPolicy(), auditLogger, registry);
 
 		// Mutate after creation — this simulates a "post-startup policy change"
 		config.autoApproveReadOps = false;

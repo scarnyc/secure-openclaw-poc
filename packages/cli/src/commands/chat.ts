@@ -4,6 +4,7 @@ import { agentLoop } from "@sentinel/agent";
 import { AuditLogger } from "@sentinel/audit";
 import { CredentialVault } from "@sentinel/crypto";
 import { createApp, createToolRegistry } from "@sentinel/executor";
+import { getDefaultPolicy } from "@sentinel/policy";
 import type { SentinelConfig } from "@sentinel/types";
 import chalk from "chalk";
 
@@ -41,7 +42,7 @@ export async function chatCommand(config: SentinelConfig, _dataDir: string): Pro
 	// Start executor (in-process for local dev)
 	const auditLogger = new AuditLogger(config.auditLogPath);
 	const registry = createToolRegistry();
-	const app = createApp(config, auditLogger, registry);
+	const app = createApp(config, getDefaultPolicy(), auditLogger, registry);
 
 	const server = serve({
 		fetch: app.fetch,
