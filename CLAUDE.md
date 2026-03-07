@@ -1,6 +1,6 @@
 # Sentinel — Secure Agent Runtime
 
-Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Built as a local-first MVP, with Cloudflare Workers deployment planned for Phase 2.
+Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Built as a local-first MVP, with optional deployment on Cloudflare Workers once proven.
 
 
 ## Quick Commands
@@ -207,9 +207,7 @@ Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation
 - **Integration**: Loads as extension into existing better-sqlite3 instance; no new infrastructure
 
 ### Vector DB: Zvec (Post-MVP, Wave 6+)
-- **Choice**: [Zvec](https://github.com/alibaba/zvec) — C++ embedded vector DB with Node.js bindings
-- **When**: After ComputeBackend ships; runs inside OpenSandbox containers on Hetzner
-- **Why defer**: Native C++ dep is premature for local-first MVP; hybrid dense+sparse search valuable at scale
+- **Choice**: [Zvec](https://github.com/alibaba/zvec) — C++ embedded vector DB with Node.js bindings; hybrid dense+sparse search valuable at scale
 
 ### Container Runtime: OpenSandbox (Post-MVP, Wave 6+)
 - **Choice**: [OpenSandbox](https://github.com/alibaba/OpenSandbox) — self-hosted sandbox platform (Docker/K8s)
@@ -230,11 +228,6 @@ Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation
 | `OPENAI_API_KEY` | Container | GPT AI provider key (required) |
 | `GEMINI_API_KEY` | Container | GOOGLE AI provider key (required) |
 | `MOLTBOT_GATEWAY_TOKEN` | Worker | Gateway access protection |
-| `CF_ACCESS_TEAM_DOMAIN` | Worker | Cloudflare Access auth domain |
-| `CF_ACCESS_AUD` | Worker | Cloudflare Access audience tag |
-| `R2_ACCESS_KEY_ID` | Worker | R2 persistence credentials |
-| `R2_SECRET_ACCESS_KEY` | Worker | R2 persistence credentials |
-| `CF_ACCOUNT_ID` | Worker | Cloudflare account ID |
 | `SENTINEL_POLICY_VERSION` | Container | Policy version string (read at startup) |
 | `SENTINEL_AUDIT_ENABLED` | Container | Enable/disable D1 audit logging |
 | `CLAUDE_MEM_DATA_DIR` | Container | claude-mem SQLite path override |
@@ -256,10 +249,6 @@ Secrets are stored via `wrangler secret put`. Local dev uses `.dev.vars` (see `.
 - `security-reviewer` — Parallel security review against invariants + OWASP patterns
 - `adversarial-tester` - Runs adversarial tests, red teaming, pen tests and mutation testing to ensure security and privacy by design (identifies and fixes security vulnerabilities)
 
-### MCP Servers (`.claude/.mcp.json`)
-- `cloudflare-bindings` — Query D1/KV/R2 directly (OAuth on first use)
-- `cloudflare-observability` — Tail Worker logs during dev
-
 ### Allowed Commands
 Defined in `.claude/settings.json` — includes wrangler, test, lint, and typecheck commands.
 
@@ -269,7 +258,6 @@ Defined in `.claude/settings.json` — includes wrangler, test, lint, and typech
 - **Biome v2, not v1** — config schema changed significantly; use `biome.json` with `$schema` v2.4.6+
 - **pnpm workspaces** — use `pnpm --filter @sentinel/<pkg>` to run commands in specific packages
 - **better-sqlite3** — native module; needs node-gyp build tools (Python, make, C++ compiler)
-- **No D1/KV in MVP** — D1 and KV are Phase 2 (CF Workers); MVP uses local SQLite + encrypted files
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **`docs/server-hardening.md`** — infrastructure hardening reference with Sentinel architecture mapping
 - **Container registry (ghcr.io)** — Not needed for local MVP; `docker compose build` suffices. Set up ghcr.io when hitting Phase 2 / DockerBackend VPS deployment: GitHub Action that builds and pushes to ghcr.io on tagged releases. That's the natural inflection point where it pays off.
@@ -310,8 +298,8 @@ Pivot from TypeScript policy engine to container-level security controls. 231 te
 
 **Still TODO (MVP scope):**
 - [ ] Agent proposes, human reviews in batch (PR model)
+- [ ] Set up openclaw - be cautious and read the setup setps in openclaw repo as we will need to modify them to work with sentinel
 - [ ] Google Workspace CLI integration — [`googleworkspace/cli`](https://github.com/googleworkspace/cli) as MCP tool source for executor
-- [ ] Create biz Google account for OpenClaw testing — isolated test identity for Google API integration
 
 **Deferred to CF deployment:**
 - [ ] Per-agent tool policies — agent self-reports ID; requires JWT auth for enforcement
@@ -346,8 +334,8 @@ Original Waves 1-6 from Hermes Addendum. Requires CF account + moltworker fork. 
 
 #### Backlog
 - [ ] sqlite-vec integration design (paused) — embedding model, vec0 schema, hybrid FTS5+vec0 queries
-- [ ] CF Workers migration — D1 for audit, KV for policy cache, Wrangler setup
+- [ ] Claude-mem setup (modify for security)
 - [ ] Plano model routing — GPT latest + fallbacks to Claude Opus, Gemini Flash Lite 3.1; reference [Claude chat 1](https://claude.ai/share/d7e9dbba-dec4-4f28-a3b7-b9920b76bd10), [Claude chat 2](https://claude.ai/share/c67fb5e7-eb4b-4356-be0e-d7ce66dd359c), [OpenAI model docs](https://developers.openai.com/api/docs/guides/latest-model)
-- [ ] Research: CopilotKit evaluation — feedback call done (Mar 3), pending next steps from John/Mike; dedicated chatbot use case + AI learning prototype; ag-ui evaluation for MCP app integration
+- [ ] CopilotKit integration; dedicated chatbot use case + AI learning prototype; ag-ui evaluation for MCP app integration
 - [ ] Research: Reddit security warning, ClawMetry review
 - [ ] Claude Code integrations and heartbeats for coding tasks via notes
