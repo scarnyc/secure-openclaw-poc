@@ -28,7 +28,12 @@ export function resolveAgentPath(targetPath: string, workspaceRoot: string): str
 
 export function isWithinWorkspace(targetPath: string, workspaceRoot: string): boolean {
 	const resolvedRoot = safeRealpath(workspaceRoot);
-	if (!resolvedRoot) return false;
+	if (!resolvedRoot) {
+		// Workspace root doesn't exist on disk — fall back to normalized path comparison
+		const normalRoot = path.resolve(workspaceRoot);
+		const normalTarget = path.resolve(targetPath);
+		return normalTarget === normalRoot || normalTarget.startsWith(normalRoot + path.sep);
+	}
 
 	const resolvedTarget = safeRealpath(targetPath);
 	if (resolvedTarget) {

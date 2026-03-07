@@ -1,4 +1,4 @@
-import type { SentinelConfig, ToolClassification } from "@sentinel/types";
+import type { PolicyDocument, SentinelConfig, ToolClassification } from "@sentinel/types";
 
 const DEFAULT_CLASSIFICATIONS: ToolClassification[] = [
 	{ tool: "read_file", defaultCategory: "read" },
@@ -12,6 +12,25 @@ const DEFAULT_CLASSIFICATIONS: ToolClassification[] = [
 		defaultCategory: "write",
 	},
 ];
+
+export function getDefaultPolicy(): PolicyDocument {
+	return {
+		version: 1,
+		toolGroups: {
+			fs: ["read_file", "write_file", "edit_file"],
+			runtime: ["bash"],
+			network: ["browser", "fetch", "curl"],
+			messaging: ["slack", "discord", "telegram", "whatsapp"],
+			automation: ["sessions_spawn", "sessions_send", "gateway"],
+		},
+		defaults: {
+			tools: { allow: ["*"], deny: ["group:network"] },
+			workspace: { root: "~/.openclaw/workspace", access: "rw" },
+			approval: { ask: "on-miss" },
+		},
+		agents: {},
+	};
+}
 
 export function getDefaultConfig(): SentinelConfig {
 	return {
