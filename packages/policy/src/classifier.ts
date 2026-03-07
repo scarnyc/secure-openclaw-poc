@@ -195,14 +195,24 @@ export function classify(
 		return legacyDecision;
 	}
 
-	// Step 6: Approval resolution (overrides legacy auto_approve/confirm)
+	// Step 6: Approval resolution
 	const approvalConfig: ApprovalConfig = agentPolicy.approval ?? policy.defaults.approval;
-	const command = tool === "bash" && typeof parameters.command === "string" ? parameters.command : undefined;
-	const approvalResult = resolveApproval(command, approvalConfig);
 
-	return {
-		action: approvalResult,
-		category: legacyDecision.category,
-		reason: legacyDecision.reason,
-	};
+	// "always" and "never" apply to all tools unconditionally
+	if (approvalConfig.ask === "always") {
+		return { action: "confirm", category: legacyDecision.category, reason: legacyDecision.reason };
+	}
+	if (approvalConfig.ask === "never") {
+		return { action: "auto_approve", category: legacyDecision.category, reason: legacyDecision.reason };
+	}
+
+	// "on-miss": allowlist matching only applies to bash commands.
+	// For non-bash tools, defer to legacy classification (reads auto-approve, writes confirm).
+	if (tool === "bash") {
+		const command = typeof parameters.command === "string" ? parameters.command : undefined;
+		const approvalResult = resolveApproval(command, approvalConfig);
+		return { action: approvalResult, category: legacyDecision.category, reason: legacyDecision.reason };
+	}
+
+	return legacyDecision;
 }
