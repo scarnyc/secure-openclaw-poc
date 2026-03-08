@@ -18,10 +18,12 @@ export interface EncryptedBlob {
 
 export function encrypt(key: Buffer, plaintext: string): EncryptedBlob {
 	const iv = randomBytes(IV_LENGTH);
+	let encrypted: Buffer | undefined;
+	let authTag: Buffer | undefined;
 	try {
 		const cipher = createCipheriv(ALGORITHM, key, iv);
-		const encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-		const authTag = cipher.getAuthTag();
+		encrypted = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
+		authTag = cipher.getAuthTag();
 		return {
 			iv: iv.toString("base64"),
 			authTag: authTag.toString("base64"),
@@ -29,6 +31,8 @@ export function encrypt(key: Buffer, plaintext: string): EncryptedBlob {
 		};
 	} finally {
 		iv.fill(0);
+		if (encrypted) encrypted.fill(0);
+		if (authTag) authTag.fill(0);
 	}
 }
 
@@ -41,6 +45,8 @@ export function decrypt(key: Buffer, iv: string, authTag: string, ciphertext: st
 		decipher.setAuthTag(authTagBuf);
 		const decrypted = Buffer.concat([decipher.update(ciphertextBuf), decipher.final()]);
 		try {
+			// S2: Return value is a V8 immutable string — cannot be zeroed from memory.
+			// Callers must minimize retention time. Vault-based Buffer keys planned for Phase 1.
 			return decrypted.toString("utf8");
 		} finally {
 			decrypted.fill(0);

@@ -20,7 +20,7 @@ No CRITICAL or HIGH findings. Six findings total: 2 MEDIUM, 3 LOW, 1 INFO.
 **Handler**: `packages/executor/src/router.ts` — `handleExecute()`
 **OWASP categories**: A01 (Broken Access Control), A03 (Injection), A04 (Insecure Design), A08 (Software and Data Integrity Failures)
 
-**Pipeline** (8 stages, lines 27-152):
+**Pipeline** (9 stages, lines 27-152):
 
 1. **Input validation** — `ActionManifestSchema.safeParse()` validates all fields via Zod: `id` (UUID), `timestamp` (ISO datetime), `tool` (non-empty string), `parameters` (record), `sessionId` and `agentId` (non-empty strings). Invalid payloads throw `ManifestValidationError` returning 400. (line 35-38)
 2. **Policy classification** — `classify(manifest, config)` produces a `PolicyDecision` with `action: "allow" | "confirm" | "block"`. Blocked actions are audit-logged and rejected with 422. (line 42, 57-69)
@@ -93,7 +93,7 @@ No CRITICAL or HIGH findings. Six findings total: 2 MEDIUM, 3 LOW, 1 INFO.
 - `HOST_AUTH_HEADERS` mapping is static and exhaustive for the 3 allowed hosts. Adding a host to `ALLOWED_LLM_HOSTS` without a corresponding `HOST_AUTH_HEADERS` entry would result in no auth injection (requests would fail at the provider), not a security bypass.
 
 **Findings**:
-- **F3 (LOW)**: API keys are read from `process.env` as V8 immutable strings (line 84). They cannot be zeroed from memory after use. The code documents this explicitly (line 41-42) and defers to Phase 1 vault-based Buffer keys. Acceptable for local dev; the keys live in the executor container's environment regardless.
+- **F3 (LOW)**: LLM proxy API keys are read from `process.env` as V8 immutable strings (line 84). They cannot be zeroed from memory after use. The code documents this explicitly (line 41-42) and defers to Phase 1 vault-based Buffer keys. Note: the `encrypt()`/`decrypt()` functions in `packages/crypto/` do zero all intermediate Buffers (iv, encrypted, authTag, ciphertext) via `fill(0)` in `finally` blocks — this finding applies only to the LLM proxy's env-var-sourced keys. Acceptable for local dev; the keys live in the executor container's environment regardless.
 - **F5 (LOW)**: The `downstreamPath` is taken directly from the URL and appended to the target host without sanitization. A path like `/v1/messages/../../../other-endpoint` would be normalized by the target server (standard HTTP behavior), not by the proxy. In practice this is not exploitable because: (a) the target host is allowlisted to 3 LLM APIs, and (b) path traversal on an HTTPS API server does not grant filesystem access. However, for defense-in-depth, normalizing the path before forwarding would prevent any future edge cases.
 
 ---
@@ -143,7 +143,7 @@ The following controls were verified as correctly implemented:
 | Audit logging on all code paths | PASS | 5 audit write sites covering block, deny, moderation, failure, success (router.ts:58,74,95,108,145) |
 | SSRF prevention via host allowlist | PASS | `ALLOWED_LLM_HOSTS` Set with 3 entries, checked before request (llm-proxy.ts:3-7, 56) |
 | Auth header stripping from agent requests | PASS | `authorization`, `x-api-key`, `x-goog-api-key` stripped (llm-proxy.ts:72-74) |
-| Symlink TOCTOU mitigation on write_file | PASS | `lstat()` check rejects symlinks before write (write-file.ts:41-42) |
+| Symlink TOCTOU mitigation on write_file | PASS | `O_NOFOLLOW` flag rejects symlinks atomically at `open()` (write-file.ts) |
 | Path whitelist with realpath resolution | PASS | `isPathAllowed()` resolves symlinks, falls back to lexical only for ENOENT (path-guard.ts:46) |
 | Deny-list for sensitive file paths | PASS | `.env*`, `.dev.vars`, `.pem`, `.key`, `secret`, `credential`, `.git/config` blocked (deny-list.ts) |
 | Docker write prefix restriction | PASS | `/app/data/` prefix enforced when `SENTINEL_DOCKER=true` (write-file.ts:65-67) |
@@ -153,13 +153,26 @@ The following controls were verified as correctly implemented:
 
 ---
 
+## Out-of-Scope Endpoints
+
+The following endpoints were not reviewed in this gate as they are informational-only and do not process untrusted input or modify state:
+
+- `GET /health` — liveness check, returns static JSON
+- `GET /agent-card` — A2A agent card metadata
+- `GET /tools` — tool registry listing
+
+These should be reviewed if they gain functionality beyond static responses.
+
+---
+
 ## Methodology
 
 - Manual code review of all endpoint handlers and supporting modules
 - Cross-reference with OWASP Top 10 2021 categories: A01 (Broken Access Control), A03 (Injection), A04 (Insecure Design), A05 (Security Misconfiguration), A07 (Identification and Authentication Failures), A08 (Software and Data Integrity Failures), A10 (SSRF)
 - Threat model: local Mac Mini, single user, Docker-isolated agent with `internal: true` network
 - Verified against project security invariants 1-6 (see CLAUDE.md)
+- **Note**: Line references are approximate and may drift as code evolves. Use function/variable names for stable cross-referencing.
 
 ## Conclusion
 
-Phase 0 gate: **PASS**. No CRITICAL or HIGH findings. The executor implements a well-structured 8-stage pipeline with defense-in-depth: input validation, policy classification, user confirmation, content moderation, credential filtering, and comprehensive audit logging. The 2 MEDIUM findings (no inter-process auth, no confirmation TTL) are mitigated by the local-first architecture and tracked for Phase 1. The 4 LOW/INFO findings are appropriate accepted risks for the current threat model.
+Phase 0 gate: **PASS**. No CRITICAL or HIGH findings. The executor implements a well-structured 9-stage pipeline with defense-in-depth: input validation, policy classification, user confirmation, content moderation, credential filtering, and comprehensive audit logging. The 2 MEDIUM findings (no inter-process auth, no confirmation TTL) are mitigated by the local-first architecture and tracked for Phase 1. The 4 LOW/INFO findings are appropriate accepted risks for the current threat model.

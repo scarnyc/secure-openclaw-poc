@@ -22,24 +22,36 @@ export async function chatCommand(config: SentinelConfig, _dataDir: string): Pro
 		return;
 	}
 
-	// Open vault
+	// Open vault — distinguish file-not-found / permission errors from wrong password
 	let vault: CredentialVault;
 	try {
 		vault = await CredentialVault.open(config.vaultPath, password);
-	} catch {
-		p.cancel("Failed to unlock vault. Wrong password?");
+	} catch (err: unknown) {
+		const code = (err as NodeJS.ErrnoException).code;
+		if (code === "ENOENT") {
+			p.cancel("Vault file not found. Run `sentinel init` first.");
+		} else if (code === "EACCES") {
+			p.cancel(`Vault file permission denied: ${config.vaultPath}`);
+		} else {
+			p.cancel("Failed to unlock vault. Wrong password?");
+		}
 		return;
 	}
 
-	// Get API key from vault
+	// Get API key from vault — distinguish missing key from corruption/decryption errors
 	let apiKey: string;
 	try {
 		const creds = await vault.retrieve("anthropic");
 		apiKey = creds.key;
 		if (!apiKey) throw new Error("No API key found");
-	} catch {
+	} catch (err: unknown) {
 		vault.destroy();
-		p.cancel("No Anthropic API key in vault. Run `sentinel init` first.");
+		const msg = err instanceof Error ? err.message : "Unknown error";
+		if (msg.includes("No credential found") || msg.includes("No API key found")) {
+			p.cancel("No Anthropic API key in vault. Run `sentinel init` first.");
+		} else {
+			p.cancel(`Failed to retrieve API key: ${msg}`);
+		}
 		return;
 	}
 

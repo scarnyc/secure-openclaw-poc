@@ -1,5 +1,5 @@
 import { realpath } from "node:fs/promises";
-import { basename, dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 
 type PathAllowed = { allowed: true; resolved: string };
 type PathDenied = { allowed: false; resolved: string; reason: string };
@@ -51,8 +51,10 @@ export async function isPathAllowed(
 			// /var → /private/var symlink, then join the filename
 			const absPath = resolve(filePath);
 			try {
-				resolved = `${await realpath(dirname(absPath))}/${basename(absPath)}`;
-			} catch {
+				resolved = join(await realpath(dirname(absPath)), basename(absPath));
+			} catch (parentErr: unknown) {
+				const parentCode = (parentErr as NodeJS.ErrnoException).code;
+				console.warn(`[path-guard] Cannot resolve parent dir for ${filePath}: ${parentCode}`);
 				resolved = absPath;
 			}
 		} else {

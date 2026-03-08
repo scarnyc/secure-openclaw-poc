@@ -194,6 +194,6 @@ describe("LLM Proxy", () => {
 
 		expect(res.status).toBe(502);
 		const body = (await res.json()) as { error: string };
-		expect(body.error).toContain("ECONNREFUSED");
+		expect(body.error).toBe("LLM proxy upstream error");
 	});
 });
