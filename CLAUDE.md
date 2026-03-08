@@ -2,28 +2,11 @@
 
 Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Local-first, runs on Mac Mini via Docker Compose.
 
-## Current Phase: Phase 0 — Make It Usable
+## Current Phase: Phase 1 — Harden for Confidence
 
-**Plan**: `docs/plans/path-a-v2-adopt-openfang-primitives.md` (approved)
+**Plan**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 
-**Goal**: Fix bugs, add missing UX. After this: `docker compose up` -> send command -> confirm -> get result -> audit entry.
-
-- [x] Fix base64 credential regex false positives (`packages/types/src/credential-patterns.ts`)
-- [x] Add `sh -c`, `bash -c`, `zsh -c` to dangerous detection (`packages/policy/src/bash-parser.ts`)
-- [x] Fix symlink TOCTOU race (`packages/executor/src/tools/write-file.ts`)
-- [x] Local path whitelist for non-Docker (`packages/executor/src/path-guard.ts`)
-- [x] Secret zeroization — `Buffer`-based keys, `fill(0)` in finally (`packages/crypto/src/encryption.ts`, `packages/executor/src/llm-proxy.ts`)
-- [x] Terminal confirmation TUI (`packages/cli/src/confirmation-tui.ts`)
-- [x] End-to-end smoke test
-- [ ] Document local dev setup
-- [ ] OWASP gate: review `/execute`, `/confirm`, `/proxy/llm` -> `docs/owasp-reviews/phase-0.md`
-
-**Previously completed (Container Hardening):**
-- [x] Agent container: `network_mode: "none"` — deferred; `internal: true` is sufficient (UDS transport needed for `none`)
-- [x] Executor: path whitelist (`allowedRoots`) — `isPathAllowed()` in path-guard.ts with symlink protection
-- [x] Config freeze: `validateConfig()` + `Object.freeze()` — crashes on missing/invalid policy at startup
-- [x] Bash deny-list: destructive `rm -rf /~/\$HOME`, mail/email (`mail`,`sendmail`,`mutt`,`postfix`), DNS exfil (`dig`,`nslookup`,`host`)
-- [x] PII scrubbing: regex-based patterns for SSN, phone, email, salary, LinkedIn/GitHub URLs in `credential-patterns.ts`
+**Phase 0 completed** (PR #7, 335 tests): bug fixes, confirmation TUI, path whitelist, OWASP gate.
 
 
 ## Quick Commands
@@ -63,7 +46,7 @@ pnpm install
 ```bash
 pnpm install
 pnpm typecheck   # Verify TypeScript
-pnpm test         # Run all tests (324+)
+pnpm test         # Run all tests (335+)
 ```
 
 ### Running locally
@@ -84,6 +67,7 @@ sentinel chat     # Start interactive agent session with TUI confirmation
 | Document | Purpose |
 |----------|---------|
 | `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping |
+| `docs/owasp-reviews/phase-0.md` | Phase 0 OWASP gate review (7 findings, all MEDIUM/LOW) |
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
 | `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 6 security invariants |
 | `.claude/skills/upstream-sync/SKILL.md` | `/upstream-sync` skill — rebase on moltworker (user-only) |
@@ -91,7 +75,7 @@ sentinel chat     # Start interactive agent session with TUI confirmation
 
 ## Architecture
 
-### Phase 1: Local MVP — Two-Process Model
+### Two-Process Model
 
 ```
 ┌─────────────────────────┐         ┌──────────────────────────────┐
@@ -228,39 +212,14 @@ export type FileReadAction = z.infer<typeof FileReadManifest>;
 ```
 
 
-## claude-mem Hardening
+## Future Work
 
-Sentinel wraps claude-mem (port 37777, SQLite + FTS5) with additional validation:
+Details in `docs/plans/path-a-v2-adopt-openfang-primitives.md` and MEMORY.md evaluation queue.
 
-| Layer | What Sentinel Adds |
-|-------|-------------------|
-| **Input validation** | Standalone Zod schemas for all 4 MCP tool inputs (`search`, `timeline`, `get_observations`, `__IMPORTANT`) — upstream relies only on transitive MCP SDK validation |
-| **Credential stripping** | Pre-write regex scan for API keys, tokens, passwords, connection strings; rejects matching entries |
-| **Size caps** | Per-observation: 10KB max; total DB: 100MB max; enforced before SQLite write |
-| **Blocked categories** | Observations tagged with blocked categories (e.g., `credential`, `secret`) are silently dropped |
-| **`<private>` tag enforcement** | Validates that upstream `<private>` tag stripping is applied; logs if raw tags reach storage |
+- Phase 1: Merkle audit, SSRF, loop guard, rate limiter, PII scrubber
+- Phase 2: Google Workspace, OpenClaw agents, sqlite-vec, CopilotKit/ag-ui
+- Phase 2 security: email injection, data compartmentalization, memory isolation, PII (NER)
 
-
-## Vector Search & Infrastructure Decisions
-
-### Vector DB: sqlite-vec (MVP, Waves 1-3)
-- **Choice**: [sqlite-vec](https://github.com/asg017/sqlite-vec) — SQLite extension adding `vec0` virtual tables
-- **Why**: claude-mem already uses SQLite + FTS5; sqlite-vec adds semantic search to the same .db file (keyword + vector in one database)
-- **Use cases**: Semantic memory retrieval, skill matching by embedding similarity, credential pattern anomaly detection
-- **Integration**: Loads as extension into existing better-sqlite3 instance; no new infrastructure
-
-### Open Design Work (sqlite-vec)
-- **Status**: Paused — resume before Wave 3 implementation
-- **Remaining decisions**: Embedding model choice (local vs API), `vec0` table schema, hybrid FTS5+vec0 query strategy, embedding generation pipeline at observation write time
-
-### Evaluation Queue
-- **CopilotKit** — Generative UI framework for AI-native apps; evaluate for agent frontend layer + dedicated chatbot
-  - Org: https://github.com/CopilotKit
-  - Key repos: `generative-ui`, `deep-agents-demo`, `with-mcp-apps`
-- **ag-ui** — Agent-UI protocol for streaming agent state to frontends; evaluate for MCP app integration
-  - Repo: https://github.com/ag-ui-protocol/ag-ui
-- **A2A Protocol** — Google's Agent-to-Agent protocol for multi-agent orchestration
-  - Decision: OpenClaw subagents/parallel agents — A2A vs skills binding model
 
 ## Environment Variables
 
@@ -309,6 +268,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **`ANTHROPIC_BASE_URL`** — must be set in agent container to `http://executor:3141/proxy/llm` to route through proxy
 - **firejail is Linux-only** — local Mac dev falls back to unsandboxed bash execution; firejail wrapping only active when `SENTINEL_BASH_SANDBOX=firejail`
 - **`SENTINEL_DOCKER=true`** — enables write-file path restriction to `/app/data/`; set in executor container env
+- **O_NOFOLLOW + realpath** — `open()` with `O_NOFOLLOW` must target the user-supplied path, not the realpath-resolved path (realpath already resolves symlinks, defeating the check); returns `ELOOP` on macOS, `EMLINK` on some Linux
 - **Archived plans** — `docs/plans/archived/` contains superseded Phase 1.5 design docs (TypeScript policy engine approach)
 
 
@@ -320,23 +280,17 @@ Completed 2026-03-05. 163 tests, 7 packages, Docker validated. Merged to `main` 
 
 **Packages delivered:** types, crypto (AES-256-GCM vault), policy (94 classification tests), audit (SQLite, credential redaction), executor (Hono :3141, deny-list filtering), agent (Anthropic SDK streaming), cli (TUI + in-process executor).
 
-### Phase 1.5: Container Hardening (Completed)
+### Phase 1.5: Container Hardening ✅ (Merged)
 
-231 tests, 16 test files. Pivot from TypeScript policy engine to container-level security controls.
+231 tests, 16 test files. Network egress lockdown, bash hardening, config freeze, unified credential filter, agentId in manifests, workspace mounts, content moderation, Docker hardening.
 
-- [x] Network egress lockdown — Docker `internal: true` network + LLM proxy through executor (`/proxy/llm/*`)
-- [x] Bash hardening — interpreter inline-exec detection (`python3 -c`, `node -e` → "dangerous") + optional firejail sandbox
-- [x] Config freeze — `Object.freeze(structuredClone())` in entrypoint; Invariant #6 now enforced
-- [x] Unified credential filter — single source of truth in `packages/types/src/credential-patterns.ts`; Gemini (`AIza`), DB connection strings, expanded GitHub/Slack patterns
-- [x] GEMINI_ env stripping — added to `STRIPPED_ENV_PREFIXES` in bash executor
-- [x] agentId in manifests — required field for audit trail; all manifests include `agentId`
-- [x] Workspace read-only mounts — Docker bind mounts + `/app/data/` write prefix check when `SENTINEL_DOCKER=true`
-- [x] Content moderation — pattern-based scanner with enforce/warn/off modes; integrated pre/post-execute in router
-- [x] Docker hardening — `USER node`, `dumb-init` entrypoint, explicit `:rw`/`:ro` mounts
+### Phase 0: Make It Usable ✅ (Merged)
 
-### Hardening (In Progress)
+335 tests (93 new). PR #7, merged 2026-03-08. Bug fixes, confirmation TUI, path whitelist, secret zeroization, OWASP gate review.
 
-See "Next Step" section above for the concrete TODO list. Threat model: protect local Mac Mini (API keys, files, Google Workspace).
+### Hardening (Phase 1)
+
+See Phase 1 roadmap in plan doc. Threat model: protect local Mac Mini (API keys, files, Google Workspace).
 
 ### Backlog
 
@@ -348,53 +302,8 @@ See "Next Step" section above for the concrete TODO list. Threat model: protect 
 - [ ] Write-action HITL via ag-ui — replace TUI confirmation with rich ag-ui frontend
 - [ ] UCP integration — unified context protocol via ag-ui + CopilotKit
 - [ ] Google Model Armor — add to executor content moderation pipeline
-- [ ] OWASP Top 10 review — security audit of executor API surface
+- [x] OWASP Top 10 review — Phase 0 gate complete (`docs/owasp-reviews/phase-0.md`)
 - [ ] Research: Reddit security warning, ClawMetry review
 - [ ] Claude Code integrations and heartbeats for coding tasks via notes
 
-#### Phase 2: Personal AI Platform — Security Gaps
-
-Threat model expands from "protect Mac Mini from rogue coding agent" to "personal data governance for multi-agent platform." Requires `docs/phase-2-personal-platform.md` design doc before implementation.
-
-**Critical:**
-- [ ] **Email prompt injection defense** — Gmail is #1 attack surface; every email body is untrusted input; fundamentally different from coding agent model where agent only reads files you control
-
-**High:**
-- [ ] **PII scrubbing (Phase 2)** — extend beyond regex; deferred categories: ZIP codes (`\b\d{5}\b` — false positives), street addresses (contextual matching), names/cities/job titles/companies (NER required), demographics (gender, race, disability, veteran — NER required); bank accounts, medical records for financial/health agents
-- [ ] **Data compartmentalization (A2A)** — per-agent data boundaries; shopping agent must not see health data, legal agent must not see finances; enforce at executor level, not application level
-- [ ] **Memory isolation per domain** — claude-mem is currently shared; need domain-scoped partitions (health, financial, legal, etc.) to prevent cross-agent data leakage
-- [ ] **Financial transaction safety** — TUI confirmation insufficient for moving money; need amount thresholds, cooling periods, maybe 2FA; distinguish "show budget" (safe) from "transfer $5000" (stronger gating)
-- [ ] **Irreversible action classification** — sending email, creating calendar invite, submitting job application, posting notes cannot be undone; safe/confirm/block doesn't capture reversibility; outbound actions need higher gating than reads
-- [ ] **Per-agent MCP scope restrictions** — Gmail MCP reads ALL emails, Calendar sees ALL events; need per-agent scope (e.g., job hunting agent can only see emails labeled "Job Search"); principle of least privilege
-
-**Medium:**
-- [ ] **Other people's PII compliance** — lead list, customer support, legal agents handle third-party data; GDPR, CCPA, CAN-SPAM obligations; different from self-PII (can't consent on their behalf)
-- [ ] **Outbound data classification** — credential filter scrubs data coming TO agent, but agents SEND data out (emails, posts, documents); need outbound scrubbing ("don't include SSN in email draft")
-- [ ] **Audit log encryption at rest** — audit log stores everything in plain text SQLite; with health/financial/legal data, the audit log itself is a target
-- [ ] **Prompt injection (expanded surfaces)** — each new MCP tool = new injection vector; attacker embeds instructions in job listings, emails, support tickets, legal docs, shopping pages; current content moderation is basic pattern matching
-
-**Low:**
-- [ ] **Legal privilege protection** — attorney-client privileged data in memory is potentially discoverable; need ability to mark data as privileged, prevent plain-text logging
-- [ ] **Tiered sensitivity framework** — not all data equal: medical records > shopping preferences; `sensitivity: "critical" | "high" | "normal"` driving different handling per tier; foundational for all gaps above
-- [ ] **Social graph protection** — networking/referral agents know who you know, who owes favors, who you've asked for help; leaked memory could damage professional relationships; social capital data needs isolation
-
-#### Phase 2: Target Agent Roster
-
-| Agent | Sensitivity | Key Risk |
-|-------|------------|----------|
-| Coding assistant | Low | File system, code exec |
-| Content creator | Low | Outbound publishing |
-| Doc/deck creator | Medium | Confidential business docs |
-| Personal productivity | Medium | Calendar, email, notes (PII) |
-| Shopping agent | Medium | Payment info, addresses |
-| Lead list agent | Medium | Other people's PII |
-| Customer support | Medium | Customer PII, company data |
-| AI learning | Medium | Learning progress, skill gaps |
-| Job hunting | High | Resume PII, applications |
-| Interview prep | High | Salary expectations, weaknesses, personal stories |
-| Networking | High | Contact relationships, conversation history |
-| Referrals | High | Names + relationships + asks (social capital) |
-| Financial/budget | Critical | Bank accounts, income, spending |
-| Retirement planning | Critical | SSN, 401k, net worth |
-| Health analysis | Critical | Medical records, conditions, medications |
-| Legal assistant | Critical | Privileged communications, contracts |
+See `docs/plans/path-a-v2-adopt-openfang-primitives.md` §Phase 2 for security gaps and agent roster.
