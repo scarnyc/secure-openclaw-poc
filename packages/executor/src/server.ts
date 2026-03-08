@@ -56,6 +56,17 @@ export function createApp(
 		return c.json(registry.list());
 	});
 
+	app.get("/pending-confirmations", (c) => {
+		const pending = Array.from(pendingConfirmations.entries()).map(([id, p]) => ({
+			manifestId: id,
+			tool: p.manifest.tool,
+			parameters: p.manifest.parameters,
+			category: p.decision.category,
+			reason: p.decision.reason,
+		}));
+		return c.json(pending);
+	});
+
 	app.all("/proxy/llm/*", handleLlmProxy);
 
 	app.post("/execute", async (c) => {
