@@ -35,7 +35,9 @@ describe("isPathAllowed", () => {
 	it("denies path outside all allowed roots", async () => {
 		const result = await isPathAllowed("/etc/passwd", [tempDir]);
 		expect(result.allowed).toBe(false);
-		expect(result.reason).toContain("outside allowed roots");
+		if (!result.allowed) {
+			expect(result.reason).toContain("outside allowed roots");
+		}
 	});
 
 	it("allows path that is exactly the root", async () => {
@@ -53,7 +55,9 @@ describe("isPathAllowed", () => {
 
 		const result = await isPathAllowed(symlinkPath, [tempDir]);
 		expect(result.allowed).toBe(false);
-		expect(result.reason).toContain("outside allowed roots");
+		if (!result.allowed) {
+			expect(result.reason).toContain("outside allowed roots");
+		}
 
 		rmSync(outsideDir, { recursive: true, force: true });
 	});
@@ -72,5 +76,17 @@ describe("isPathAllowed", () => {
 	it("denies path traversal via ..", async () => {
 		const result = await isPathAllowed(join(tempDir, "..", "etc", "passwd"), [tempDir]);
 		expect(result.allowed).toBe(false);
+	});
+
+	it("denies circular symlink (ELOOP) instead of falling back", async () => {
+		const link1 = join(tempDir, "loop1");
+		const link2 = join(tempDir, "loop2");
+		symlinkSync(link2, link1);
+		symlinkSync(link1, link2);
+		const result = await isPathAllowed(link1, [tempDir]);
+		expect(result.allowed).toBe(false);
+		if (!result.allowed) {
+			expect(result.reason).toContain("Cannot resolve real path");
+		}
 	});
 });

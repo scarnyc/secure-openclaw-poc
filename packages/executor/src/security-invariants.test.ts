@@ -149,7 +149,7 @@ describe("Security Invariant #3: Blocked tool categories enforced", () => {
 			const res = await postExecute(app, manifest);
 			const result = (await res.json()) as ToolResult;
 			expect(result.success, `should deny: ${command}`).toBe(false);
-			expect(result.error).toContain("denied");
+			expect(result.error).toContain("sensitive file");
 		}
 	});
 });

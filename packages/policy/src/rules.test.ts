@@ -32,4 +32,21 @@ describe("validateConfig", () => {
 		const invalid = { ...config, executor: { ...config.executor, port: -1 } };
 		expect(() => validateConfig(invalid)).toThrow();
 	});
+
+	it("throws on allowedRoots set to empty array", () => {
+		const config = { ...getDefaultConfig(), allowedRoots: [] };
+		expect(() => validateConfig(config)).toThrow("empty");
+	});
+
+	it("accepts config with allowedRoots paths", () => {
+		const config = { ...getDefaultConfig(), allowedRoots: ["/app/data"] };
+		const result = validateConfig(config);
+		expect(result.allowedRoots).toEqual(["/app/data"]);
+	});
+
+	it("accepts config without allowedRoots (optional)", () => {
+		const config = getDefaultConfig();
+		const result = validateConfig(config);
+		expect(result.allowedRoots).toBeUndefined();
+	});
 });

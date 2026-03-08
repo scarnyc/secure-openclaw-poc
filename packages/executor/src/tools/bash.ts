@@ -30,38 +30,71 @@ async function isFirejailAvailable(): Promise<boolean> {
 const DEFAULT_TIMEOUT_MS = 30_000;
 const MAX_TIMEOUT_MS = 300_000;
 
-// File-reading commands that could exfiltrate sensitive data
+// Deny-listed command patterns: sensitive file access, destructive ops, mail, DNS exfil
 const FILE_READ_CMDS = String.raw`\b(cat|head|tail|less|more|tac|nl|od|xxd|hexdump|base64|strings)\b`;
 const SENSITIVE_FILE = String.raw`\.(env|pem|key)\b`;
-const DENIED_FILE_PATTERNS = [
-	new RegExp(`${FILE_READ_CMDS}.*${SENSITIVE_FILE}`),
-	new RegExp(`${FILE_READ_CMDS}.*\\.dev\\.vars\\b`),
-	new RegExp(`${FILE_READ_CMDS}.*\\.git/(config|credentials)\\b`),
-	new RegExp(`${FILE_READ_CMDS}.*secret`, "i"),
-	new RegExp(`${FILE_READ_CMDS}.*credential`, "i"),
-	new RegExp(`${FILE_READ_CMDS}.*vault\\.enc\\b`),
+const DENIED_PATTERNS: Array<{ pattern: RegExp; reason: string }> = [
+	// Sensitive file reads
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*${SENSITIVE_FILE}`),
+		reason: "Command reads a sensitive file",
+	},
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*\\.dev\\.vars\\b`),
+		reason: "Command reads a sensitive file",
+	},
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*\\.git/(config|credentials)\\b`),
+		reason: "Command reads a sensitive file",
+	},
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*secret`, "i"),
+		reason: "Command reads a sensitive file",
+	},
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*credential`, "i"),
+		reason: "Command reads a sensitive file",
+	},
+	{
+		pattern: new RegExp(`${FILE_READ_CMDS}.*vault\\.enc\\b`),
+		reason: "Command reads a sensitive file",
+	},
 	// Block cp/mv of sensitive files
-	/\b(cp|mv)\b.*\.(env|pem|key)\b/,
-	/\b(cp|mv)\b.*\.dev\.vars\b/,
-	/\b(cp|mv)\b.*vault\.enc\b/,
+	{ pattern: /\b(cp|mv)\b.*\.(env|pem|key)\b/, reason: "Command copies/moves a sensitive file" },
+	{ pattern: /\b(cp|mv)\b.*\.dev\.vars\b/, reason: "Command copies/moves a sensitive file" },
+	{ pattern: /\b(cp|mv)\b.*vault\.enc\b/, reason: "Command copies/moves a sensitive file" },
 	// Block curl/wget file exfiltration of sensitive files
-	/\bcurl\b.*@.*\.(env|pem|key)\b/,
-	/\bcurl\b.*-d\b.*\.(env|pem|key)\b/,
-	// Destructive rm: any rm with recursive flag targeting root/home
-	/\brm\b.*-[a-zA-Z]*r.*\s+\//,
-	/\brm\b.*-[a-zA-Z]*r.*\s+~/,
-	/\brm\b.*-[a-zA-Z]*r.*\s+\$HOME/,
-	/\brm\b.*--recursive.*[/~]/,
-	// Mail commands (data exfiltration)
-	/\b(mail|mailx|sendmail|mutt|postfix)\b/,
-	// DNS exfiltration
-	/\b(nslookup|dig|host)\b/,
+	{ pattern: /\bcurl\b.*@.*\.(env|pem|key)\b/, reason: "Command exfiltrates a sensitive file" },
+	{ pattern: /\bcurl\b.*-d\b.*\.(env|pem|key)\b/, reason: "Command exfiltrates a sensitive file" },
+	// Destructive rm: recursive targeting root or home only
+	{
+		pattern: /\brm\b.*-[a-zA-Z]*r[a-zA-Z]*\s+\/(\s|$|\*)/,
+		reason: "Destructive recursive deletion denied",
+	},
+	{ pattern: /\brm\b.*-[a-zA-Z]*r[a-zA-Z]*\s+~/, reason: "Destructive recursive deletion denied" },
+	{
+		pattern: /\brm\b.*-[a-zA-Z]*r[a-zA-Z]*\s+\$HOME/,
+		reason: "Destructive recursive deletion denied",
+	},
+	{
+		pattern: /\brm\b.*--recursive.*\s+\/(\s|$|\*)/,
+		reason: "Destructive recursive deletion denied",
+	},
+	// Mail commands in command position (data exfiltration)
+	{
+		pattern: /(?:^|[|;&]\s*)(mail|mailx|sendmail|mutt|postfix)\b/,
+		reason: "Mail commands denied (data exfiltration risk)",
+	},
+	// DNS exfiltration: nslookup/dig anywhere, host in command position only
+	{ pattern: /\b(nslookup|dig)\b/, reason: "DNS lookup commands denied (exfiltration risk)" },
+	{ pattern: /(?:^|[|;&]\s*)host\s/, reason: "DNS lookup commands denied (exfiltration risk)" },
 ];
 
 function isDeniedBashCommand(command: string): string | null {
-	for (const pattern of DENIED_FILE_PATTERNS) {
-		if (pattern.test(command)) {
-			return "Command attempts to read a denied file";
+	for (const entry of DENIED_PATTERNS) {
+		if (entry.pattern.test(command)) {
+			console.warn(`[bash-deny] ${entry.reason}`);
+			return entry.reason;
 		}
 	}
 	return null;

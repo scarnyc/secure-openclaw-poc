@@ -1,5 +1,5 @@
-import { mkdir, realpath, writeFile } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import type { ToolResult } from "@sentinel/types";
 import { isDeniedPath } from "./deny-list.js";
 import { isPathAllowed } from "./path-guard.js";
@@ -25,7 +25,7 @@ export async function executeWriteFile(
 		};
 	}
 
-	// Path whitelist check (replaces hardcoded SENTINEL_DOCKER check)
+	// Path whitelist check (runs before Docker-specific prefix check below)
 	const guard = await isPathAllowed(params.path, allowedRoots);
 	if (!guard.allowed) {
 		return {
@@ -39,8 +39,7 @@ export async function executeWriteFile(
 	// Defense-in-depth: restrict writes to allowed prefix in Docker
 	if (process.env.SENTINEL_DOCKER === "true") {
 		const ALLOWED_WRITE_PREFIX = "/app/data/";
-		const resolved = await realpath(resolve(params.path)).catch(() => resolve(params.path));
-		if (!resolved.startsWith(ALLOWED_WRITE_PREFIX)) {
+		if (!guard.resolved.startsWith(ALLOWED_WRITE_PREFIX)) {
 			return {
 				manifestId,
 				success: false,
@@ -49,8 +48,8 @@ export async function executeWriteFile(
 			};
 		}
 		try {
-			await mkdir(dirname(resolved), { recursive: true });
-			await writeFile(resolved, params.content, "utf-8");
+			await mkdir(dirname(guard.resolved), { recursive: true });
+			await writeFile(guard.resolved, params.content, "utf-8");
 			return {
 				manifestId,
 				success: true,

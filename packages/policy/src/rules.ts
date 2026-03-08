@@ -41,5 +41,15 @@ export function validateConfig(config: unknown): SentinelConfig {
 	if (parsed.classifications.length === 0) {
 		throw new Error("FATAL: Policy requires at least one tool classification");
 	}
+	if (parsed.allowedRoots && parsed.allowedRoots.length === 0) {
+		throw new Error(
+			"FATAL: allowedRoots is set but empty — provide paths or remove the field entirely",
+		);
+	}
+	if (!parsed.allowedRoots) {
+		console.warn(
+			"WARNING: allowedRoots is not configured — path whitelist is DISABLED, all file paths are allowed",
+		);
+	}
 	return parsed;
 }

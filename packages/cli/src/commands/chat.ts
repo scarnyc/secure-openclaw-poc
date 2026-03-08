@@ -4,10 +4,14 @@ import { agentLoop } from "@sentinel/agent";
 import { AuditLogger } from "@sentinel/audit";
 import { CredentialVault } from "@sentinel/crypto";
 import { createApp, createToolRegistry } from "@sentinel/executor";
+import { validateConfig } from "@sentinel/policy";
 import type { SentinelConfig } from "@sentinel/types";
 import chalk from "chalk";
 
 export async function chatCommand(config: SentinelConfig, _dataDir: string): Promise<void> {
+	// Validate config (same gate as entrypoint)
+	validateConfig(config);
+
 	// Prompt for master password
 	const password = await p.password({
 		message: "Master password:",

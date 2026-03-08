@@ -132,6 +132,21 @@ describe("redactCredentials: PII scrubbing", () => {
 		expect(result).toContain("[PII_REDACTED]");
 	});
 
+	it("does NOT redact small dollar amounts", () => {
+		expect(redactCredentials("cost: $5")).toContain("$5");
+		expect(redactCredentials("price: $99")).toContain("$99");
+	});
+
+	it("redacts salary amounts", () => {
+		const result = redactCredentials("salary: $150,000");
+		expect(result).not.toContain("$150,000");
+		expect(result).toContain("[PII_REDACTED]");
+	});
+
+	it("does NOT redact GitHub repo URLs", () => {
+		expect(redactCredentials("https://github.com/nodejs/node")).toContain("github.com/nodejs/node");
+	});
+
 	it("redacts LinkedIn URLs", () => {
 		const input = "https://linkedin.com/in/jane-doe";
 		const result = redactCredentials(input);

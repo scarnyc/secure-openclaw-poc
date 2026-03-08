@@ -26,8 +26,6 @@ export {
 	ToolRegistryEntrySchema,
 } from "./config.js";
 export {
-	CREDENTIAL_PATTERNS,
-	PII_PATTERNS,
 	redactAll,
 	redactAllCredentials,
 	redactPII,

@@ -3,7 +3,7 @@
  * Used by both executor credential-filter and audit redaction.
  */
 
-export const CREDENTIAL_PATTERNS: readonly RegExp[] = [
+const CREDENTIAL_PATTERNS: readonly RegExp[] = [
 	// Anthropic API keys
 	/sk-ant-[A-Za-z0-9_-]+/g,
 	// OpenAI-style keys
@@ -49,28 +49,28 @@ export function redactAllCredentials(text: string): string {
 }
 
 /**
- * PII detection patterns — derived from jobhunter envchain fields.
- * Regex-feasible categories only; names, cities, titles deferred to NER.
+ * Regex-feasible PII categories. Names, cities, titles deferred to NER
+ * (see Phase 2 backlog in CLAUDE.md).
  */
-export const PII_PATTERNS: readonly RegExp[] = [
+const PII_PATTERNS: readonly RegExp[] = [
 	// US Social Security Numbers: XXX-XX-XXXX
 	/\b\d{3}-\d{2}-\d{4}\b/g,
 	// US phone: (XXX) XXX-XXXX
 	/\(\d{3}\)\s?\d{3}[-. ]\d{4}/g,
 	// US phone: XXX-XXX-XXXX, XXX.XXX.XXXX, XXX XXX XXXX
 	/(?<!\d)\d{3}[-. ]\d{3}[-. ]\d{4}(?!\d)/g,
-	// International phone: +1XXXXXXXXXX
+	// US/Canada phone with country code: +1XXXXXXXXXX
 	/\+1\d{10}\b/g,
 	// Email addresses
 	/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g,
-	// Salary: $XXX,XXX or $XXX,XXX.XX
-	/\$\d{1,3}(,\d{3})*(\.\d{2})?\b/g,
+	// Salary: $XX,XXX or $XXX,XXX.XX (requires comma-separated thousands)
+	/\$\d{1,3},\d{3}(,\d{3})*(\.\d{2})?\b/g,
 	// Salary shorthand: $XXK or $XXXk
 	/\$\d+[Kk]\b/g,
 	// LinkedIn profile URLs
 	/https?:\/\/(www\.)?linkedin\.com\/in\/[A-Za-z0-9_-]+\/?/g,
-	// GitHub profile URLs
-	/https?:\/\/(www\.)?github\.com\/[A-Za-z0-9_-]+\/?/g,
+	// GitHub profile URLs (not repo URLs — requires end of string or whitespace after username)
+	/https?:\/\/(www\.)?github\.com\/[A-Za-z0-9_-]+\/?(?=\s|$)/g,
 ];
 
 const PII_REDACTED = "[PII_REDACTED]";
@@ -90,7 +90,7 @@ export function redactPII(text: string): string {
 
 /**
  * Redact credentials first (more specific), then PII.
- * Use this as the unified scrubbing function.
+ * Credentials first so tokens matching both get [REDACTED] rather than [PII_REDACTED].
  */
 export function redactAll(text: string): string {
 	return redactPII(redactAllCredentials(text));

@@ -172,6 +172,34 @@ describe("filterCredentials: PII scrubbing", () => {
 		expect(filtered.output).toBe("hello world, no PII here");
 	});
 
+	it("does NOT redact small dollar amounts ($5, $10)", () => {
+		const result = makeResult("Price: $5 and $10 and $99");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).toContain("$5");
+		expect(filtered.output).toContain("$10");
+		expect(filtered.output).toContain("$99");
+	});
+
+	it("redacts salary-level amounts ($150,000)", () => {
+		const result = makeResult("Expected: $150,000.00");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).not.toContain("$150,000");
+		expect(filtered.output).toContain("[PII_REDACTED]");
+	});
+
+	it("does NOT redact GitHub repo URLs", () => {
+		const result = makeResult("See https://github.com/nodejs/node for details");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).toContain("github.com/nodejs/node");
+	});
+
+	it("redacts GitHub profile URLs (no repo path)", () => {
+		const result = makeResult("Profile: https://github.com/johndoe");
+		const filtered = filterCredentials(result);
+		expect(filtered.output).not.toContain("github.com/johndoe");
+		expect(filtered.output).toContain("[PII_REDACTED]");
+	});
+
 	it("strips both credentials and PII in same string", () => {
 		const result = makeResult("key: sk-ant-abc123-testkey456789012345 phone: 555-123-4567");
 		const filtered = filterCredentials(result);
