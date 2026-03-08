@@ -2,17 +2,28 @@
 
 Sentinel is a security-hardened agent runtime with process isolation between the agent (untrusted) and executor (trusted). Local-first, runs on Mac Mini via Docker Compose.
 
-## Next Step — Hardening TODO
+## Current Phase: Phase 0 — Make It Usable
 
-**MVP scope (protect local Mac Mini):**
+**Plan**: `docs/plans/path-a-v2-adopt-openfang-primitives.md` (approved)
+
+**Goal**: Fix bugs, add missing UX. After this: `docker compose up` -> send command -> confirm -> get result -> audit entry.
+
+- [x] Fix base64 credential regex false positives (`packages/types/src/credential-patterns.ts`)
+- [x] Add `sh -c`, `bash -c`, `zsh -c` to dangerous detection (`packages/policy/src/bash-parser.ts`)
+- [x] Fix symlink TOCTOU race (`packages/executor/src/tools/write-file.ts`)
+- [x] Local path whitelist for non-Docker (`packages/executor/src/path-guard.ts`)
+- [x] Secret zeroization — `Buffer`-based keys, `fill(0)` in finally (`packages/crypto/src/encryption.ts`, `packages/executor/src/llm-proxy.ts`)
+- [x] Terminal confirmation TUI (`packages/cli/src/confirmation-tui.ts`)
+- [x] End-to-end smoke test
+- [ ] Document local dev setup
+- [ ] OWASP gate: review `/execute`, `/confirm`, `/proxy/llm` -> `docs/owasp-reviews/phase-0.md`
+
+**Previously completed (Container Hardening):**
 - [x] Agent container: `network_mode: "none"` — deferred; `internal: true` is sufficient (UDS transport needed for `none`)
 - [x] Executor: path whitelist (`allowedRoots`) — `isPathAllowed()` in path-guard.ts with symlink protection
 - [x] Config freeze: `validateConfig()` + `Object.freeze()` — crashes on missing/invalid policy at startup
 - [x] Bash deny-list: destructive `rm -rf /~/\$HOME`, mail/email (`mail`,`sendmail`,`mutt`,`postfix`), DNS exfil (`dig`,`nslookup`,`host`)
 - [x] PII scrubbing: regex-based patterns for SSN, phone, email, salary, LinkedIn/GitHub URLs in `credential-patterns.ts`
-- [ ] Agent proposes, human reviews in batch (PR model)
-- [ ] Set up OpenClaw — be cautious and read the setup steps in OpenClaw repo as we will need to modify them to work with Sentinel
-- [ ] Google Workspace CLI integration — [`googleworkspace/cli`](https://github.com/googleworkspace/cli) as MCP tool source for executor
 
 
 ## Quick Commands
@@ -40,6 +51,32 @@ git clone <this-repo> && cd secure-openclaw
 pnpm install
 # API key stored in encrypted vault via `sentinel init`, not env vars
 ```
+
+
+## Local Development
+
+### Prerequisites
+- Node.js 18+
+- pnpm 9+
+
+### Setup
+```bash
+pnpm install
+pnpm typecheck   # Verify TypeScript
+pnpm test         # Run all tests (324+)
+```
+
+### Running locally
+```bash
+sentinel init     # First-time: set master password, store API keys
+sentinel chat     # Start interactive agent session with TUI confirmation
+```
+
+### Environment
+- `SENTINEL_ALLOWED_ROOTS` — comma-separated path whitelist (defaults to cwd)
+- `SENTINEL_DOCKER=true` — enables container-mode restrictions
+- `SENTINEL_MODERATION_MODE=enforce|warn|off` — content moderation
+- See `.dev.vars.example` for all variables
 
 
 ## Reference Documents

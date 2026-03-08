@@ -1,0 +1,18 @@
+# Sentinel development environment variables
+# Copy to .dev.vars and fill in real values (never commit .dev.vars)
+
+# LLM API keys (stored in encrypted vault via `sentinel init` — these are only needed for Docker mode)
+ANTHROPIC_API_KEY=sk-ant-your-key-here
+OPENAI_API_KEY=sk-your-key-here
+GEMINI_API_KEY=AIza-your-key-here
+
+# Executor configuration
+SENTINEL_DOCKER=false
+SENTINEL_MODERATION_MODE=off
+SENTINEL_AUDIT_ENABLED=true
+
+# Path whitelist (comma-separated, defaults to cwd in local mode)
+# SENTINEL_ALLOWED_ROOTS=/Users/you/Code/project1,/Users/you/Code/project2
+
+# Bash sandbox (firejail is Linux-only, ignored on macOS)
+# SENTINEL_BASH_SANDBOX=firejail
