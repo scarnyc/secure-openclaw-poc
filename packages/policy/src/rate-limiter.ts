@@ -14,6 +14,9 @@ export class RateLimiter {
 	private readonly tats: Map<string, number> = new Map();
 
 	constructor(config: RateLimiterConfig) {
+		if (config.rate <= 0 || config.period <= 0) {
+			throw new Error("rate and period must be positive");
+		}
 		this.emissionInterval = config.period / config.rate;
 		this.period = config.period;
 	}
@@ -32,7 +35,7 @@ export class RateLimiter {
 	}
 
 	reset(agentId?: string): void {
-		if (agentId) {
+		if (agentId !== undefined) {
 			this.tats.delete(agentId);
 		} else {
 			this.tats.clear();

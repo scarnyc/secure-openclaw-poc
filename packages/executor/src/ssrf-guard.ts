@@ -74,8 +74,9 @@ export function isPrivateIp(ip: string): boolean {
 		return true;
 	}
 
-	// fe80::/10 — link-local
-	if (normalized.startsWith("fe80")) {
+	// fe80::/10 — link-local (covers fe80:: through febf::)
+	const prefix = parseInt(normalized.slice(0, 4), 16);
+	if (!Number.isNaN(prefix) && prefix >= 0xfe80 && prefix <= 0xfebf) {
 		return true;
 	}
 
@@ -90,8 +91,10 @@ export async function checkSsrf(url: string): Promise<void> {
 	let parsed: URL;
 	try {
 		parsed = new URL(url);
-	} catch {
-		throw new SsrfError(`Invalid URL: ${url}`);
+	} catch (parseError) {
+		throw new SsrfError(
+			`Invalid URL: ${url} (${parseError instanceof Error ? parseError.message : "parse error"})`,
+		);
 	}
 
 	const hostname = parsed.hostname;

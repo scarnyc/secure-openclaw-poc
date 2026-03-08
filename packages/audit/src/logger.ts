@@ -49,17 +49,28 @@ interface AuditRow {
 	created_at: string;
 }
 
-export interface ChainVerification {
-	valid: boolean;
-	brokenAt?: string;
-}
+export type ChainVerification = { valid: true } | { valid: false; brokenAt: string };
 
 /**
  * Compute a SHA-256 hash for an audit entry, chaining to the previous entry's hash.
- * Uses a deterministic string format: prevHash|id|timestamp|manifestId|tool|category|decision|result
+ * Uses JSON serialization to prevent delimiter injection (second-preimage attacks).
+ * Covers ALL security-relevant fields: id, timestamp, manifestId, sessionId, agentId,
+ * tool, category, decision, parameters_summary, result.
  */
 export function computeEntryHash(entry: AuditEntry, prevHash: string): string {
-	const data = `${prevHash}|${entry.id}|${entry.timestamp}|${entry.manifestId}|${entry.tool}|${entry.category}|${entry.decision}|${entry.result}`;
+	const data = JSON.stringify([
+		prevHash,
+		entry.id,
+		entry.timestamp,
+		entry.manifestId,
+		entry.sessionId,
+		entry.agentId,
+		entry.tool,
+		entry.category,
+		entry.decision,
+		entry.parameters_summary,
+		entry.result,
+	]);
 	return createHash("sha256").update(data).digest("hex");
 }
 
@@ -154,17 +165,21 @@ export class AuditLogger {
 
 	verifyChain(): ChainVerification {
 		const db = this.getDb();
+		// Select ALL fields included in computeEntryHash to ensure tamper detection
 		const rows = db
 			.prepare(
-				"SELECT id, timestamp, manifest_id, tool, category, decision, result, prev_hash, entry_hash FROM audit_log ORDER BY rowid ASC",
+				"SELECT id, timestamp, manifest_id, session_id, agent_id, tool, category, decision, parameters_summary, result, prev_hash, entry_hash FROM audit_log ORDER BY rowid ASC",
 			)
 			.all() as Array<{
 			id: string;
 			timestamp: string;
 			manifest_id: string;
+			session_id: string;
+			agent_id: string;
 			tool: string;
 			category: string;
 			decision: string;
+			parameters_summary: string;
 			result: string;
 			prev_hash: string;
 			entry_hash: string;
@@ -172,18 +187,17 @@ export class AuditLogger {
 
 		let expectedPrevHash = "";
 		for (const row of rows) {
-			// Reconstruct the entry to compute expected hash
 			const entry: AuditEntry = {
 				id: row.id,
 				timestamp: row.timestamp,
 				manifestId: row.manifest_id,
+				sessionId: row.session_id,
+				agentId: row.agent_id,
 				tool: row.tool,
 				category: row.category as AuditEntry["category"],
 				decision: row.decision as AuditEntry["decision"],
-				parameters_summary: "",
+				parameters_summary: row.parameters_summary,
 				result: row.result as AuditEntry["result"],
-				sessionId: "",
-				agentId: "",
 			};
 
 			if (row.prev_hash !== expectedPrevHash) {
@@ -212,11 +226,17 @@ export class AuditLogger {
 	private migrateIfNeeded(db: Database.Database): void {
 		const columns = db.pragma("table_info(audit_log)") as Array<{ name: string }>;
 		const columnNames = columns.map((c) => c.name);
-		if (!columnNames.includes("prev_hash")) {
-			db.exec("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''");
-		}
-		if (!columnNames.includes("entry_hash")) {
-			db.exec("ALTER TABLE audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT ''");
+		try {
+			if (!columnNames.includes("prev_hash")) {
+				db.exec("ALTER TABLE audit_log ADD COLUMN prev_hash TEXT NOT NULL DEFAULT ''");
+			}
+			if (!columnNames.includes("entry_hash")) {
+				db.exec("ALTER TABLE audit_log ADD COLUMN entry_hash TEXT NOT NULL DEFAULT ''");
+			}
+		} catch (migrationError) {
+			throw new Error(
+				`Failed to migrate audit_log for Merkle hash-chain columns: ${migrationError instanceof Error ? migrationError.message : String(migrationError)}`,
+			);
 		}
 	}
 

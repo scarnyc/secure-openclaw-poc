@@ -81,9 +81,7 @@ describe("bash deny-list: destructive rm", () => {
 	it("allows rm -rf with specific absolute path (not root)", async () => {
 		const result = await executeBash({ command: "rm -rf /tmp/mydir" }, "test-id");
 		// Should NOT be denied — targeting specific subdir, not root
-		if (result.error) {
-			expect(result.error).not.toContain("Destructive");
-		}
+		expect(result.error ?? "").not.toContain("Destructive");
 	});
 });
 
@@ -103,9 +101,7 @@ describe("bash deny-list: mail commands", () => {
 	it("allows npm install nodemailer (mail not in command position)", async () => {
 		// Use echo to avoid actually running npm install (timeout)
 		const result = await executeBash({ command: "echo npm install nodemailer" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("Mail commands denied");
-		}
+		expect(result.error ?? "").not.toContain("Mail commands denied");
 	});
 });
 
@@ -130,16 +126,12 @@ describe("bash deny-list: DNS exfiltration", () => {
 
 	it("allows hostname command (not the host DNS tool)", async () => {
 		const result = await executeBash({ command: "hostname" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("DNS lookup");
-		}
+		expect(result.error ?? "").not.toContain("DNS lookup");
 	});
 
 	it("allows echo containing the word host", async () => {
 		const result = await executeBash({ command: 'echo "check host"' }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("DNS lookup");
-		}
+		expect(result.error ?? "").not.toContain("DNS lookup");
 	});
 });
 
@@ -166,9 +158,7 @@ describe("bash deny-list: Phase 1 additions", () => {
 
 	it("allows normal dd (file to file)", async () => {
 		const result = await executeBash({ command: "dd if=input.txt of=output.txt bs=4k" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("Disk destruction");
-		}
+		expect(result.error ?? "").not.toContain("Disk destruction");
 	});
 
 	// Filesystem formatting
@@ -205,16 +195,12 @@ describe("bash deny-list: Phase 1 additions", () => {
 
 	it("allows normal kill (specific PID)", async () => {
 		const result = await executeBash({ command: "kill 12345" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("Process kill denied");
-		}
+		expect(result.error ?? "").not.toContain("Process kill denied");
 	});
 
 	it("allows kill -9 with normal PID", async () => {
 		const result = await executeBash({ command: "kill -9 12345" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("Process kill denied");
-		}
+		expect(result.error ?? "").not.toContain("Process kill denied");
 	});
 
 	// Recursive chmod 777 on root
@@ -232,15 +218,11 @@ describe("bash deny-list: Phase 1 additions", () => {
 
 	it("allows normal chmod (specific file)", async () => {
 		const result = await executeBash({ command: "chmod 644 file.txt" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("permission change");
-		}
+		expect(result.error ?? "").not.toContain("permission change");
 	});
 
 	it("allows chmod -R 755 on specific directory", async () => {
 		const result = await executeBash({ command: "chmod -R 755 /tmp/mydir" }, "test-id");
-		if (result.error) {
-			expect(result.error).not.toContain("permission change");
-		}
+		expect(result.error ?? "").not.toContain("permission change");
 	});
 });

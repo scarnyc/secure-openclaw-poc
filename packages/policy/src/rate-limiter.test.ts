@@ -45,7 +45,8 @@ describe("RateLimiter (GCRA)", () => {
 		const rejected = limiter.check("agent-1");
 		expect(rejected.allowed).toBe(false);
 
-		vi.advanceTimersByTime(rejected.retryAfter!);
+		expect(rejected.retryAfter).toBeDefined();
+		vi.advanceTimersByTime(rejected.retryAfter as number);
 
 		const result = limiter.check("agent-1");
 		expect(result.allowed).toBe(true);
@@ -86,6 +87,18 @@ describe("RateLimiter (GCRA)", () => {
 		limiter.reset();
 		expect(limiter.check("agent-1").allowed).toBe(true);
 		expect(limiter.check("agent-2").allowed).toBe(true);
+	});
+
+	it("throws on zero rate", () => {
+		expect(() => new RateLimiter({ rate: 0, period: 1000 })).toThrow(
+			"rate and period must be positive",
+		);
+	});
+
+	it("throws on negative period", () => {
+		expect(() => new RateLimiter({ rate: 5, period: -1 })).toThrow(
+			"rate and period must be positive",
+		);
 	});
 
 	it("burst: first N requests allowed, rest rejected", () => {

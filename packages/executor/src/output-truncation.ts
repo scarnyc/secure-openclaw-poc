@@ -29,11 +29,4 @@ export function truncateBashOutput(output: string): string {
 	return truncateOutput(output, BASH_OUTPUT_LIMIT);
 }
 
-/**
- * Truncate HTTP response output to 10MB.
- */
-export function truncateHttpOutput(output: string): string {
-	return truncateOutput(output, HTTP_OUTPUT_LIMIT);
-}
-
 export { BASH_OUTPUT_LIMIT, HTTP_OUTPUT_LIMIT };

@@ -3,7 +3,6 @@ import {
 	BASH_OUTPUT_LIMIT,
 	HTTP_OUTPUT_LIMIT,
 	truncateBashOutput,
-	truncateHttpOutput,
 	truncateOutput,
 } from "./output-truncation.js";
 
@@ -71,13 +70,8 @@ describe("truncateBashOutput", () => {
 	});
 });
 
-describe("truncateHttpOutput", () => {
-	it("uses 10MB limit", () => {
+describe("HTTP_OUTPUT_LIMIT constant", () => {
+	it("is 10MB", () => {
 		expect(HTTP_OUTPUT_LIMIT).toBe(10 * 1024 * 1024);
-	});
-
-	it("passes through output under 10MB", () => {
-		const output = "A".repeat(1000);
-		expect(truncateHttpOutput(output)).toBe(output);
 	});
 });

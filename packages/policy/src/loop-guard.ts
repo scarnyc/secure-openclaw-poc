@@ -27,8 +27,18 @@ const DEFAULT_CONFIG: LoopGuardConfig = {
 	windowMs: 60_000,
 };
 
+function stableStringify(obj: unknown): string {
+	if (obj === null || typeof obj !== "object") return JSON.stringify(obj);
+	if (Array.isArray(obj)) return `[${obj.map(stableStringify).join(",")}]`;
+	const sorted = Object.keys(obj as Record<string, unknown>).sort();
+	const entries = sorted.map(
+		(k) => `${JSON.stringify(k)}:${stableStringify((obj as Record<string, unknown>)[k])}`,
+	);
+	return `{${entries.join(",")}}`;
+}
+
 function fingerprint(tool: string, params: Record<string, unknown>): string {
-	return createHash("sha256").update(JSON.stringify({ tool, params })).digest("hex");
+	return createHash("sha256").update(stableStringify({ tool, params })).digest("hex");
 }
 
 export class LoopGuard {
@@ -36,7 +46,14 @@ export class LoopGuard {
 	private readonly history: Map<string, HistoryEntry[]> = new Map();
 
 	constructor(config?: Partial<LoopGuardConfig>) {
-		this.config = { ...DEFAULT_CONFIG, ...config };
+		const merged = { ...DEFAULT_CONFIG, ...config };
+		if (merged.warnThreshold >= merged.blockThreshold) {
+			throw new Error("warnThreshold must be less than blockThreshold");
+		}
+		if (merged.maxHistorySize < 1 || merged.windowMs < 1) {
+			throw new Error("maxHistorySize and windowMs must be positive");
+		}
+		this.config = Object.freeze(merged);
 	}
 
 	check(agentId: string, tool: string, params: Record<string, unknown>): LoopCheckResult {

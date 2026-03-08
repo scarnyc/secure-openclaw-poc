@@ -83,6 +83,18 @@ describe("isPrivateIp", () => {
 	it("allows ::ffff:8.8.8.8 (IPv4-mapped IPv6 public)", () => {
 		expect(isPrivateIp("::ffff:8.8.8.8")).toBe(false);
 	});
+
+	it("blocks fe90::1 (IPv6 link-local fe80::/10 range)", () => {
+		expect(isPrivateIp("fe90::1")).toBe(true);
+	});
+
+	it("blocks febf::1 (end of IPv6 link-local range)", () => {
+		expect(isPrivateIp("febf::1")).toBe(true);
+	});
+
+	it("allows ff00::1 (IPv6 multicast, outside link-local)", () => {
+		expect(isPrivateIp("ff00::1")).toBe(false);
+	});
 });
 
 describe("checkSsrf", () => {
@@ -155,5 +167,17 @@ describe("checkSsrf", () => {
 		mockedDns.resolve4.mockRejectedValue(new Error("ENOTFOUND"));
 		mockedDns.resolve6.mockRejectedValue(new Error("ENOTFOUND"));
 		await expect(checkSsrf("https://no-such-host.test")).rejects.toThrow(SsrfError);
+	});
+
+	it("blocks hex IP literal http://0x7f000001/", async () => {
+		await expect(checkSsrf("http://0x7f000001/")).rejects.toThrow(SsrfError);
+	});
+
+	it("blocks decimal IP literal http://2130706433/", async () => {
+		await expect(checkSsrf("http://2130706433/")).rejects.toThrow(SsrfError);
+	});
+
+	it("blocks http://[fe90::1]/ (IPv6 link-local in full range)", async () => {
+		await expect(checkSsrf("http://[fe90::1]/")).rejects.toThrow(SsrfError);
 	});
 });

@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -82,7 +81,6 @@ describe("Merkle hash-chain audit log", () => {
 
 		const result = logger.verifyChain();
 		expect(result.valid).toBe(true);
-		expect(result.brokenAt).toBeUndefined();
 		logger.close();
 	});
 
@@ -103,7 +101,7 @@ describe("Merkle hash-chain audit log", () => {
 
 		const result = logger.verifyChain();
 		expect(result.valid).toBe(false);
-		expect(result.brokenAt).toBe(e2.id);
+		if (!result.valid) expect(result.brokenAt).toBe(e2.id);
 		logger.close();
 	});
 
@@ -164,7 +162,44 @@ describe("Merkle hash-chain audit log", () => {
 
 		const result = logger.verifyChain();
 		expect(result.valid).toBe(false);
-		expect(result.brokenAt).toBe(e1.id);
+		if (!result.valid) expect(result.brokenAt).toBe(e1.id);
+		logger.close();
+	});
+
+	it("tampered parameters_summary is detected by verifyChain", () => {
+		const dbPath = makeTempDbPath();
+		const logger = new AuditLogger(dbPath);
+		const e1 = makeEntry({
+			timestamp: "2026-01-01T00:00:00.000Z",
+			parameters_summary: "original command",
+		});
+		logger.log(e1);
+
+		const db = new Database(dbPath);
+		db.prepare("UPDATE audit_log SET parameters_summary = 'tampered command' WHERE id = ?").run(
+			e1.id,
+		);
+		db.close();
+
+		const result = logger.verifyChain();
+		expect(result.valid).toBe(false);
+		if (!result.valid) expect(result.brokenAt).toBe(e1.id);
+		logger.close();
+	});
+
+	it("tampered agentId is detected by verifyChain", () => {
+		const dbPath = makeTempDbPath();
+		const logger = new AuditLogger(dbPath);
+		const e1 = makeEntry({ timestamp: "2026-01-01T00:00:00.000Z", agentId: "real-agent" });
+		logger.log(e1);
+
+		const db = new Database(dbPath);
+		db.prepare("UPDATE audit_log SET agent_id = 'fake-agent' WHERE id = ?").run(e1.id);
+		db.close();
+
+		const result = logger.verifyChain();
+		expect(result.valid).toBe(false);
+		if (!result.valid) expect(result.brokenAt).toBe(e1.id);
 		logger.close();
 	});
 

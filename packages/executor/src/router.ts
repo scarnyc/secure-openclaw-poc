@@ -49,6 +49,19 @@ export async function handleExecute(
 	if (guards?.rateLimiter) {
 		const rateResult = guards.rateLimiter.check(manifest.agentId);
 		if (!rateResult.allowed) {
+			auditLogger.log({
+				id: crypto.randomUUID(),
+				timestamp: new Date().toISOString(),
+				manifestId: manifest.id,
+				sessionId: manifest.sessionId,
+				agentId: manifest.agentId,
+				tool: manifest.tool,
+				category: "dangerous",
+				decision: "block",
+				parameters_summary: redactCredentials(summarizeParams(manifest.parameters)),
+				result: "blocked_by_rate_limit",
+				duration_ms: 0,
+			});
 			return {
 				manifestId: manifest.id,
 				success: false,
@@ -61,7 +74,35 @@ export async function handleExecute(
 	// 3. Loop guard check (Phase 1)
 	if (guards?.loopGuard) {
 		const loopResult = guards.loopGuard.check(manifest.agentId, manifest.tool, manifest.parameters);
+		if (loopResult.action === "warn") {
+			auditLogger.log({
+				id: crypto.randomUUID(),
+				timestamp: new Date().toISOString(),
+				manifestId: manifest.id,
+				sessionId: manifest.sessionId,
+				agentId: manifest.agentId,
+				tool: manifest.tool,
+				category: "dangerous",
+				decision: "allow",
+				parameters_summary: redactCredentials(summarizeParams(manifest.parameters)),
+				result: "loop_guard_warning",
+				duration_ms: 0,
+			});
+		}
 		if (loopResult.action === "block") {
+			auditLogger.log({
+				id: crypto.randomUUID(),
+				timestamp: new Date().toISOString(),
+				manifestId: manifest.id,
+				sessionId: manifest.sessionId,
+				agentId: manifest.agentId,
+				tool: manifest.tool,
+				category: "dangerous",
+				decision: "block",
+				parameters_summary: redactCredentials(summarizeParams(manifest.parameters)),
+				result: "blocked_by_loop_guard",
+				duration_ms: 0,
+			});
 			return {
 				manifestId: manifest.id,
 				success: false,
@@ -74,7 +115,7 @@ export async function handleExecute(
 	// 4. Classify via policy engine
 	const decision = classify(manifest, config);
 
-	// 3. Decide
+	// 5. Decide
 	const auditBase: Omit<AuditEntry, "result" | "duration_ms"> = {
 		id: crypto.randomUUID(),
 		timestamp: new Date().toISOString(),
@@ -118,7 +159,7 @@ export async function handleExecute(
 		}
 	}
 
-	// 4. Pre-execute moderation: scan request parameters
+	// 6. Pre-execute moderation: scan request parameters
 	const paramText = summarizeParams(manifest.parameters);
 	const preModeration = moderate(paramText);
 	if (preModeration.blocked) {
@@ -135,7 +176,7 @@ export async function handleExecute(
 		};
 	}
 
-	// 5. Execute
+	// 7. Execute
 	const handler = registry.get(manifest.tool);
 	if (!handler) {
 		auditLogger.log({
@@ -153,13 +194,13 @@ export async function handleExecute(
 
 	const rawResult = await handler(manifest.parameters, manifest.id);
 
-	// 6. Filter credentials from tool output before it reaches the agent
+	// 8. Filter credentials from tool output before it reaches the agent
 	const credFiltered = filterCredentials(rawResult);
 
-	// 7. PII scrub (Phase 1)
+	// 9. PII scrub (Phase 1)
 	const result = scrubPII(credFiltered);
 
-	// 8. Post-execute moderation: scan tool output
+	// 10. Post-execute moderation: scan tool output
 	if (result.output) {
 		const postModeration = moderate(result.output);
 		if (postModeration.blocked) {
@@ -177,7 +218,7 @@ export async function handleExecute(
 		}
 	}
 
-	// 8. Audit
+	// 11. Audit
 	auditLogger.log({
 		...auditBase,
 		result: result.success ? "success" : "failure",

@@ -140,7 +140,7 @@ describe("Auth middleware — token configured", () => {
 		expect(res.status).toBe(401);
 	});
 
-	it("uses constant-time comparison (tokens of different content same length)", async () => {
+	it("rejects wrong token of same length as configured token", async () => {
 		const app = createAppWithAuth(SECRET);
 		// Verify that a token with same length but different content is rejected
 		const wrongToken = "x".repeat(SECRET.length);

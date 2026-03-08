@@ -97,6 +97,9 @@ export async function handleLlmProxy(c: Context): Promise<Response> {
 		if (error instanceof SsrfError) {
 			return c.json({ error: "Blocked: SSRF protection" }, 403);
 		}
+		console.error(
+			`[llm-proxy] SSRF check failed unexpectedly: ${error instanceof Error ? error.message : "Unknown"}`,
+		);
 		return c.json({ error: "SSRF check failed" }, 500);
 	}
 

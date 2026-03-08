@@ -68,12 +68,17 @@ export function createApp(
 	// Auth middleware for all routes except /health
 	// SENTINEL: constant-time bearer token auth (Phase 1 hardening)
 	const authMiddleware = createAuthMiddleware(config.authToken);
-	app.use("/agent-card", authMiddleware);
-	app.use("/tools", authMiddleware);
-	app.use("/pending-confirmations", authMiddleware);
-	app.use("/execute", authMiddleware);
-	app.use("/confirm/*", authMiddleware);
-	app.use("/proxy/*", authMiddleware);
+	if (!config.authToken) {
+		console.warn(
+			"[sentinel] WARNING: No authToken configured — executor running without authentication",
+		);
+	}
+	app.use("*", async (c, next) => {
+		if (c.req.path === "/health") {
+			return next();
+		}
+		return authMiddleware(c, next);
+	});
 
 	app.get("/agent-card", (c) => {
 		return c.json(AGENT_CARD);
@@ -105,7 +110,10 @@ export function createApp(
 			if (error instanceof ManifestValidationError) {
 				return c.json({ error: error.message }, 400);
 			}
-			return c.json({ error: error instanceof Error ? error.message : "Internal error" }, 500);
+			console.error(
+				`[execute] Unhandled error: ${error instanceof Error ? error.message : "Unknown"}`,
+			);
+			return c.json({ error: "Internal execution error" }, 500);
 		}
 	});
 
