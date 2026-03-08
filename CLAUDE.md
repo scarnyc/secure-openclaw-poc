@@ -274,17 +274,17 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 
 ## Build Progress
 
-### Phase 1: Local MVP ✅ (Merged)
+### Phase 0: Local MVP ✅ (Merged)
 
 Completed 2026-03-05. 163 tests, 7 packages, Docker validated. Merged to `main` (commit `0af8fcc`).
 
 **Packages delivered:** types, crypto (AES-256-GCM vault), policy (94 classification tests), audit (SQLite, credential redaction), executor (Hono :3141, deny-list filtering), agent (Anthropic SDK streaming), cli (TUI + in-process executor).
 
-### Phase 1.5: Container Hardening ✅ (Merged)
+### Phase 0.1: Container Hardening ✅ (Merged)
 
 231 tests, 16 test files. Network egress lockdown, bash hardening, config freeze, unified credential filter, agentId in manifests, workspace mounts, content moderation, Docker hardening.
 
-### Phase 0: Make It Usable ✅ (Merged)
+### Phase 0.2: Make It Usable ✅ (Merged)
 
 335 tests (93 new). PR #7, merged 2026-03-08. Bug fixes, confirmation TUI, path whitelist, secret zeroization, OWASP gate review.
 
