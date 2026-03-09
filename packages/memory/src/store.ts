@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
+import type { Embedder } from "./embedder.js";
 import { MemoryQuotaError } from "./errors.js";
 import type {
 	CreateObservation,
@@ -108,6 +109,7 @@ interface SummaryRow {
 export interface MemoryStoreConfig {
 	maxTotalBytes?: number;
 	dedupWindowSeconds?: number;
+	embedder?: Embedder;
 }
 
 const DEFAULT_MAX_TOTAL_BYTES = 104_857_600; // 100MB
@@ -156,6 +158,8 @@ export class MemoryStore {
 	private db: Database.Database | null;
 	private maxTotalBytes: number;
 	private dedupWindowSeconds: number;
+	private embedder: Embedder | null;
+	private vecEnabled: boolean;
 
 	// Prepared statements
 	private insertObsStmt: Database.Statement;
@@ -165,11 +169,14 @@ export class MemoryStore {
 	private updateStorageStmt: Database.Statement;
 	private getStorageStmt: Database.Statement;
 	private insertSummaryStmt: Database.Statement;
+	private insertVecStmt: Database.Statement | null = null;
 
 	constructor(dbPath: string, config: MemoryStoreConfig = {}) {
 		this.maxTotalBytes = config.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
 		this.dedupWindowSeconds =
 			config.dedupWindowSeconds ?? DEFAULT_DEDUP_WINDOW_SECONDS;
+		this.embedder = config.embedder ?? null;
+		this.vecEnabled = false;
 
 		const db = new Database(dbPath);
 		db.pragma("journal_mode = WAL");
@@ -185,6 +192,27 @@ export class MemoryStore {
 		db.exec(CREATE_INDEX_CREATED);
 		db.exec(CREATE_INDEX_SUMMARY_SCOPE);
 		db.exec(CREATE_INDEX_SUMMARY_PROJECT);
+
+		// Load sqlite-vec extension if embedder is provided
+		if (this.embedder) {
+			try {
+				const sqliteVec = require("sqlite-vec");
+				sqliteVec.load(db);
+				db.exec(
+					`CREATE VIRTUAL TABLE IF NOT EXISTS observations_vec USING vec0(
+						observation_id TEXT NOT NULL,
+						embedding float[384]
+					)`,
+				);
+				this.insertVecStmt = db.prepare(
+					"INSERT INTO observations_vec (observation_id, embedding) VALUES (?, ?)",
+				);
+				this.vecEnabled = true;
+			} catch {
+				// sqlite-vec not available — fall back to FTS5 only
+				this.vecEnabled = false;
+			}
+		}
 
 		// Initialize storage stats row if not exists
 		db.prepare(
@@ -393,6 +421,94 @@ export class MemoryStore {
 			)
 			.run(retentionDays);
 		return result.changes;
+	}
+
+	async observeWithEmbedding(input: CreateObservation): Promise<string> {
+		const id = this.observe(input);
+
+		if (this.embedder && this.vecEnabled && this.insertVecStmt) {
+			const obs = this.getById(id);
+			if (obs) {
+				const text = `${obs.title} ${obs.content}`;
+				const embedding = await this.embedder.embed(text);
+				const buffer = Buffer.from(embedding.buffer);
+				this.insertVecStmt.run(id, buffer);
+			}
+		}
+
+		return id;
+	}
+
+	async vectorSearch(
+		queryText: string,
+		limit: number,
+	): Promise<Observation[]> {
+		const db = this.getDb();
+		if (!this.embedder || !this.vecEnabled) {
+			return [];
+		}
+
+		const queryEmbedding = await this.embedder.embed(queryText);
+		const buffer = Buffer.from(queryEmbedding.buffer);
+
+		const rows = db
+			.prepare(
+				`SELECT o.* FROM observations o
+				 JOIN observations_vec v ON v.observation_id = o.id
+				 WHERE v.embedding MATCH ? AND k = ?`,
+			)
+			.all(buffer, limit) as ObservationRow[];
+
+		return rows.map(rowToObservation);
+	}
+
+	async hybridSearch(query: SearchQuery): Promise<Observation[]> {
+		const db = this.getDb();
+		const limit = query.limit ?? 20;
+
+		// Get FTS5 results
+		const ftsResults = query.query ? this.ftsSearch(db, { ...query, limit: limit * 2 }) : [];
+
+		// Get vector results if embedder is available
+		let vecResults: Observation[] = [];
+		if (this.embedder && this.vecEnabled && query.query) {
+			vecResults = await this.vectorSearch(query.query, limit * 2);
+		}
+
+		// If only one source has results, return it directly
+		if (ftsResults.length === 0) return vecResults.slice(0, limit);
+		if (vecResults.length === 0) return ftsResults.slice(0, limit);
+
+		// Reciprocal Rank Fusion (RRF) with k=60
+		const RRF_K = 60;
+		const scores = new Map<string, { score: number; obs: Observation }>();
+
+		for (let i = 0; i < ftsResults.length; i++) {
+			const obs = ftsResults[i];
+			const existing = scores.get(obs.id);
+			const rrfScore = 1 / (RRF_K + i + 1);
+			if (existing) {
+				existing.score += rrfScore;
+			} else {
+				scores.set(obs.id, { score: rrfScore, obs });
+			}
+		}
+
+		for (let i = 0; i < vecResults.length; i++) {
+			const obs = vecResults[i];
+			const existing = scores.get(obs.id);
+			const rrfScore = 1 / (RRF_K + i + 1);
+			if (existing) {
+				existing.score += rrfScore;
+			} else {
+				scores.set(obs.id, { score: rrfScore, obs });
+			}
+		}
+
+		return [...scores.values()]
+			.sort((a, b) => b.score - a.score)
+			.slice(0, limit)
+			.map((entry) => entry.obs);
 	}
 
 	getStorageBytes(): number {
