@@ -23,11 +23,7 @@ afterEach(() => {
 describe("buildSessionContext", () => {
 	it("returns empty string when no summaries exist", () => {
 		const store = new MemoryStore(makeTempDbPath());
-		const context = buildSessionContext(
-			store,
-			"secure-openclaw",
-			"claude-code",
-		);
+		const context = buildSessionContext(store, "secure-openclaw", "claude-code");
 		expect(context).toBe("");
 		store.close();
 	});
@@ -47,11 +43,7 @@ describe("buildSessionContext", () => {
 			nextSteps: ["Implement MemoryStore core", "Add vector search"],
 		});
 
-		const context = buildSessionContext(
-			store,
-			"secure-openclaw",
-			"claude-code",
-		);
+		const context = buildSessionContext(store, "secure-openclaw", "claude-code");
 		expect(context).toContain("Memory store implementation");
 		expect(context).toContain("Implement MemoryStore core");
 		expect(context).toContain("Add vector search");
@@ -71,25 +63,12 @@ describe("buildSessionContext", () => {
 				{ length: 10 },
 				(_, i) => `Investigated item ${i} with lots of detail`,
 			),
-			learned: Array.from(
-				{ length: 10 },
-				(_, i) => `Learned item ${i} with extensive description`,
-			),
-			completed: Array.from(
-				{ length: 10 },
-				(_, i) => `Completed task ${i}`,
-			),
-			nextSteps: Array.from(
-				{ length: 10 },
-				(_, i) => `Next step ${i} requiring careful work`,
-			),
+			learned: Array.from({ length: 10 }, (_, i) => `Learned item ${i} with extensive description`),
+			completed: Array.from({ length: 10 }, (_, i) => `Completed task ${i}`),
+			nextSteps: Array.from({ length: 10 }, (_, i) => `Next step ${i} requiring careful work`),
 		});
 
-		const context = buildSessionContext(
-			store,
-			"secure-openclaw",
-			"claude-code",
-		);
+		const context = buildSessionContext(store, "secure-openclaw", "claude-code");
 		// ~200 tokens ≈ ~800 characters
 		expect(context.length).toBeLessThanOrEqual(1000);
 		store.close();

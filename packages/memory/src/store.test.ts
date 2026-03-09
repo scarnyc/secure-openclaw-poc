@@ -40,9 +40,11 @@ describe("MemoryStore", () => {
 		expect(id).toBeDefined();
 		const obs = store.getById(id);
 		expect(obs).toBeDefined();
-		expect(obs!.title).toBe("Learned about FTS5");
-		expect(obs!.content).toBe(validObs.content);
-		expect(obs!.project).toBe("secure-openclaw");
+		if (obs) {
+			expect(obs.title).toBe("Learned about FTS5");
+			expect(obs.content).toBe(validObs.content);
+			expect(obs.project).toBe("secure-openclaw");
+		}
 		store.close();
 	});
 
@@ -170,11 +172,7 @@ describe("MemoryStore", () => {
 			sessionId: "s2",
 		});
 
-		const recent = store.getRecentByAgent(
-			"secure-openclaw",
-			"claude-code",
-			10,
-		);
+		const recent = store.getRecentByAgent("secure-openclaw", "claude-code", 10);
 		expect(recent).toHaveLength(1);
 		expect(recent[0].agentId).toBe("claude-code");
 		store.close();

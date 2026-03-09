@@ -22,24 +22,16 @@ describe("Embedder", () => {
 
 	it("embeds text to Float32Array of correct length", async () => {
 		const embedder = await LocalEmbedder.create();
-		const embedding = await embedder.embed(
-			"FTS5 supports porter stemming",
-		);
+		const embedding = await embedder.embed("FTS5 supports porter stemming");
 		expect(embedding).toBeInstanceOf(Float32Array);
 		expect(embedding.length).toBe(384);
 	}, 60000);
 
 	it("similar texts have higher cosine similarity than unrelated texts", async () => {
 		const embedder = await LocalEmbedder.create();
-		const a = await embedder.embed(
-			"SQLite full text search with FTS5",
-		);
-		const b = await embedder.embed(
-			"FTS5 keyword search in SQLite database",
-		);
-		const c = await embedder.embed(
-			"How to bake chocolate chip cookies",
-		);
+		const a = await embedder.embed("SQLite full text search with FTS5");
+		const b = await embedder.embed("FTS5 keyword search in SQLite database");
+		const c = await embedder.embed("How to bake chocolate chip cookies");
 
 		const simAB = cosineSimilarity(a, b);
 		const simAC = cosineSimilarity(a, c);

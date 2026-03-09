@@ -19,10 +19,7 @@ export function validateObservation(input: unknown): ValidationResult {
 	const sanitizedTitle = redactAll(parsed.data.title);
 
 	const contentStripped = sanitizedContent.trim();
-	if (
-		contentStripped === "[REDACTED]" ||
-		contentStripped === "[PII_REDACTED]"
-	) {
+	if (contentStripped === "[REDACTED]" || contentStripped === "[PII_REDACTED]") {
 		return {
 			valid: false,
 			reason: "Observation contains only sensitive data",

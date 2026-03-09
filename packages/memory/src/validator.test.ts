@@ -138,8 +138,7 @@ describe("Invariant #5: No credentials in memory", () => {
 	it("accepts observation with mixed content and credentials", () => {
 		const result = validateObservation({
 			...validObs,
-			content:
-				"The API key sk-ant-api03-secret was found in the config file at line 42",
+			content: "The API key sk-ant-api03-secret was found in the config file at line 42",
 		});
 		expect(result.valid).toBe(true);
 		if (result.valid) {

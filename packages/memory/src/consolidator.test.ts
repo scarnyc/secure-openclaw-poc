@@ -56,10 +56,7 @@ describe("Consolidator", () => {
 		});
 
 		const consolidator = new Consolidator(store);
-		const summary = consolidator.generateSessionSummary(
-			"session-1",
-			"secure-openclaw",
-		);
+		const summary = consolidator.generateSessionSummary("session-1", "secure-openclaw");
 		expect(summary).toBeDefined();
 		expect(summary.scope).toBe("session");
 		expect(summary.project).toBe("secure-openclaw");
@@ -75,10 +72,7 @@ describe("Consolidator", () => {
 		store.observe(baseObs);
 
 		const consolidator = new Consolidator(store);
-		const sessionSummary = consolidator.generateSessionSummary(
-			"session-1",
-			"secure-openclaw",
-		);
+		const sessionSummary = consolidator.generateSessionSummary("session-1", "secure-openclaw");
 		store.writeSummary(sessionSummary);
 
 		const range = {
@@ -118,14 +112,8 @@ describe("Consolidator", () => {
 		});
 
 		const consolidator = new Consolidator(store);
-		const s1 = consolidator.generateSessionSummary(
-			"session-1",
-			"secure-openclaw",
-		);
-		const s2 = consolidator.generateSessionSummary(
-			"session-2",
-			"secure-openclaw",
-		);
+		const s1 = consolidator.generateSessionSummary("session-1", "secure-openclaw");
+		const s2 = consolidator.generateSessionSummary("session-2", "secure-openclaw");
 
 		store.writeSummary(s1);
 		store.writeSummary(s2);

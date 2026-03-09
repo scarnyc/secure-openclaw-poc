@@ -7,21 +7,21 @@ export interface Embedder {
 export class LocalEmbedder implements Embedder {
 	readonly dimensions = 384;
 	readonly model = "Xenova/bge-small-en-v1.5";
-	private pipe: ((
-		text: string,
-		options: { pooling: string; normalize: boolean },
-	) => Promise<{ data: Float32Array }>) | null = null;
+	private pipe:
+		| ((
+				text: string,
+				options: { pooling: string; normalize: boolean },
+		  ) => Promise<{ data: Float32Array }>)
+		| null = null;
 
 	private constructor() {}
 
 	static async create(): Promise<LocalEmbedder> {
 		const embedder = new LocalEmbedder();
 		const { pipeline } = await import("@huggingface/transformers");
-		embedder.pipe = (await pipeline(
-			"feature-extraction",
-			"Xenova/bge-small-en-v1.5",
-			{ dtype: "fp32" },
-		)) as unknown as (
+		embedder.pipe = (await pipeline("feature-extraction", "Xenova/bge-small-en-v1.5", {
+			dtype: "fp32",
+		})) as unknown as (
 			text: string,
 			options: { pooling: string; normalize: boolean },
 		) => Promise<{ data: Float32Array }>;

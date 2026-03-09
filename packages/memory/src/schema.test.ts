@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-	CreateObservationSchema,
-	CreateSummarySchema,
-	SearchQuerySchema,
-} from "./schema.js";
+import { CreateObservationSchema, CreateSummarySchema, SearchQuerySchema } from "./schema.js";
 
 describe("CreateObservationSchema", () => {
 	const validObs = {

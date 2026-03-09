@@ -42,28 +42,22 @@ describe("MemoryStore vector search", () => {
 		await store.observeWithEmbedding({
 			...validObs,
 			title: "SSRF guard",
-			content:
-				"Block private IPs, localhost, and cloud metadata endpoints",
+			content: "Block private IPs, localhost, and cloud metadata endpoints",
 		});
 		await store.observeWithEmbedding({
 			...validObs,
 			title: "Rate limiter",
-			content:
-				"GCRA algorithm for per-agent request throttling",
+			content: "GCRA algorithm for per-agent request throttling",
 			sessionId: "s2",
 		});
 		await store.observeWithEmbedding({
 			...validObs,
 			title: "Baking cookies",
-			content:
-				"Mix flour, sugar, butter, and chocolate chips. Bake at 350F for 12 minutes.",
+			content: "Mix flour, sugar, butter, and chocolate chips. Bake at 350F for 12 minutes.",
 			sessionId: "s3",
 		});
 
-		const results = await store.vectorSearch(
-			"network security and request filtering",
-			2,
-		);
+		const results = await store.vectorSearch("network security and request filtering", 2);
 		expect(results).toHaveLength(2);
 		// Both security-related results should be returned, not the cookie one
 		const titles = results.map((r) => r.title);
@@ -81,8 +75,7 @@ describe("MemoryStore vector search", () => {
 		await store.observeWithEmbedding({
 			...validObs,
 			title: "Merkle audit",
-			content:
-				"SHA-256 hash chain over audit rows for tamper detection",
+			content: "SHA-256 hash chain over audit rows for tamper detection",
 			sessionId: "s2",
 		});
 

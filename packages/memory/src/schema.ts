@@ -47,6 +47,7 @@ export const SearchQuerySchema = z.object({
 	offset: z.number().int().min(0).default(0),
 });
 export type SearchQuery = z.infer<typeof SearchQuerySchema>;
+export type SearchInput = z.input<typeof SearchQuerySchema>;
 
 export const CreateSummarySchema = z.object({
 	project: z.string().min(1).max(500),
@@ -62,6 +63,7 @@ export const CreateSummarySchema = z.object({
 	observationIds: z.array(z.string().uuid()).default([]),
 });
 export type CreateSummary = z.infer<typeof CreateSummarySchema>;
+export type CreateSummaryInput = z.input<typeof CreateSummarySchema>;
 
 export const SummarySchema = CreateSummarySchema.extend({
 	id: z.string().uuid(),

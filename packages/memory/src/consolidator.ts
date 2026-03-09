@@ -58,18 +58,12 @@ export class Consolidator {
 		};
 	}
 
-	consolidateDay(
-		project: string,
-		range: { start: string; end: string },
-	): ConsolidationResult {
+	consolidateDay(project: string, range: { start: string; end: string }): ConsolidationResult {
 		if (this.store.hasSummaryForPeriod("daily", range)) {
 			return { skipped: true };
 		}
 
-		const sessionSummaries = this.store.getSummariesByPeriod(
-			"session",
-			range,
-		);
+		const sessionSummaries = this.store.getSummariesByPeriod("session", range);
 		if (sessionSummaries.length === 0) {
 			return { skipped: true };
 		}

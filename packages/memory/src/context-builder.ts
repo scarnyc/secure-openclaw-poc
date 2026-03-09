@@ -2,11 +2,7 @@ import type { MemoryStore } from "./store.js";
 
 const MAX_CONTEXT_CHARS = 800; // ~200 tokens
 
-export function buildSessionContext(
-	store: MemoryStore,
-	project: string,
-	_agentId: string,
-): string {
+export function buildSessionContext(store: MemoryStore, project: string, _agentId: string): string {
 	const summaries = store.getRecentSummaries(project, 1);
 	if (summaries.length === 0) return "";
 

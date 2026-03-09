@@ -2,15 +2,18 @@ import { createHash, randomUUID } from "node:crypto";
 import Database from "better-sqlite3";
 import type { Embedder } from "./embedder.js";
 import { MemoryQuotaError } from "./errors.js";
-import type {
-	CreateObservation,
-	CreateSummary,
-	Observation,
-	Scope,
-	SearchQuery,
-	Summary,
+import {
+	type CreateObservation,
+	type CreateSummaryInput,
+	CreateSummarySchema,
+	type Observation,
+	type Scope,
+	type SearchInput,
+	type SearchQuery,
+	SearchQuerySchema,
+	type Summary,
 } from "./schema.js";
-import { type ValidationResult, validateObservation } from "./validator.js";
+import { validateObservation } from "./validator.js";
 
 const CREATE_OBSERVATIONS = `
 CREATE TABLE IF NOT EXISTS observations (
@@ -60,14 +63,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS observations_fts USING fts5(
   tokenize = 'porter'
 )`;
 
-const CREATE_INDEX_PROJECT =
-	"CREATE INDEX IF NOT EXISTS idx_obs_project ON observations(project)";
-const CREATE_INDEX_AGENT =
-	"CREATE INDEX IF NOT EXISTS idx_obs_agent ON observations(agent_id)";
+const CREATE_INDEX_PROJECT = "CREATE INDEX IF NOT EXISTS idx_obs_project ON observations(project)";
+const CREATE_INDEX_AGENT = "CREATE INDEX IF NOT EXISTS idx_obs_agent ON observations(agent_id)";
 const CREATE_INDEX_SESSION =
 	"CREATE INDEX IF NOT EXISTS idx_obs_session ON observations(session_id)";
-const CREATE_INDEX_HASH =
-	"CREATE INDEX IF NOT EXISTS idx_obs_hash ON observations(content_hash)";
+const CREATE_INDEX_HASH = "CREATE INDEX IF NOT EXISTS idx_obs_hash ON observations(content_hash)";
 const CREATE_INDEX_CREATED =
 	"CREATE INDEX IF NOT EXISTS idx_obs_created ON observations(created_at)";
 const CREATE_INDEX_SUMMARY_SCOPE =
@@ -173,8 +173,7 @@ export class MemoryStore {
 
 	constructor(dbPath: string, config: MemoryStoreConfig = {}) {
 		this.maxTotalBytes = config.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
-		this.dedupWindowSeconds =
-			config.dedupWindowSeconds ?? DEFAULT_DEDUP_WINDOW_SECONDS;
+		this.dedupWindowSeconds = config.dedupWindowSeconds ?? DEFAULT_DEDUP_WINDOW_SECONDS;
 		this.embedder = config.embedder ?? null;
 		this.vecEnabled = false;
 
@@ -215,9 +214,7 @@ export class MemoryStore {
 		}
 
 		// Initialize storage stats row if not exists
-		db.prepare(
-			"INSERT OR IGNORE INTO storage_stats (id, total_bytes) VALUES (1, 0)",
-		).run();
+		db.prepare("INSERT OR IGNORE INTO storage_stats (id, total_bytes) VALUES (1, 0)").run();
 
 		this.db = db;
 
@@ -231,9 +228,7 @@ export class MemoryStore {
 			VALUES (?, ?, ?, ?)
 		`);
 
-		this.getByIdStmt = db.prepare(
-			"SELECT * FROM observations WHERE id = ?",
-		);
+		this.getByIdStmt = db.prepare("SELECT * FROM observations WHERE id = ?");
 
 		this.dedupCheckStmt = db.prepare(
 			"SELECT id FROM observations WHERE content_hash = ? AND created_at > datetime('now', '-' || ? || ' seconds')",
@@ -243,9 +238,7 @@ export class MemoryStore {
 			"UPDATE storage_stats SET total_bytes = total_bytes + ? WHERE id = 1",
 		);
 
-		this.getStorageStmt = db.prepare(
-			"SELECT total_bytes FROM storage_stats WHERE id = 1",
-		);
+		this.getStorageStmt = db.prepare("SELECT total_bytes FROM storage_stats WHERE id = 1");
 
 		this.insertSummaryStmt = db.prepare(`
 			INSERT INTO summaries (id, project, source, scope, period_start, period_end, title, investigated, learned, completed, next_steps, observation_ids)
@@ -264,10 +257,9 @@ export class MemoryStore {
 
 		// Dedup check
 		if (this.dedupWindowSeconds > 0) {
-			const existing = this.dedupCheckStmt.get(
-				hash,
-				this.dedupWindowSeconds,
-			) as { id: string } | undefined;
+			const existing = this.dedupCheckStmt.get(hash, this.dedupWindowSeconds) as
+				| { id: string }
+				| undefined;
 			if (existing) {
 				return existing.id;
 			}
@@ -301,12 +293,7 @@ export class MemoryStore {
 				filesJson,
 			);
 
-			this.insertFtsStmt.run(
-				id,
-				sanitized.title,
-				sanitized.content,
-				sanitized.concepts.join(" "),
-			);
+			this.insertFtsStmt.run(id, sanitized.title, sanitized.content, sanitized.concepts.join(" "));
 
 			this.updateStorageStmt.run(contentBytes);
 		});
@@ -321,8 +308,9 @@ export class MemoryStore {
 		return row ? rowToObservation(row) : undefined;
 	}
 
-	search(query: SearchQuery): Observation[] {
+	search(input: SearchInput): Observation[] {
 		const db = this.getDb();
+		const query = SearchQuerySchema.parse(input);
 
 		if (query.query) {
 			return this.ftsSearch(db, query);
@@ -330,11 +318,7 @@ export class MemoryStore {
 		return this.filterSearch(db, query);
 	}
 
-	getRecentByAgent(
-		project: string,
-		agentId: string,
-		limit: number,
-	): Observation[] {
+	getRecentByAgent(project: string, agentId: string, limit: number): Observation[] {
 		const db = this.getDb();
 		const rows = db
 			.prepare(
@@ -347,15 +331,14 @@ export class MemoryStore {
 	getObservationsBySession(sessionId: string): Observation[] {
 		const db = this.getDb();
 		const rows = db
-			.prepare(
-				"SELECT * FROM observations WHERE session_id = ? ORDER BY created_at ASC",
-			)
+			.prepare("SELECT * FROM observations WHERE session_id = ? ORDER BY created_at ASC")
 			.all(sessionId) as ObservationRow[];
 		return rows.map(rowToObservation);
 	}
 
-	writeSummary(input: CreateSummary): string {
+	writeSummary(rawInput: CreateSummaryInput): string {
 		this.getDb();
+		const input = CreateSummarySchema.parse(rawInput);
 		const id = randomUUID();
 		this.insertSummaryStmt.run(
 			id,
@@ -365,19 +348,16 @@ export class MemoryStore {
 			input.periodStart,
 			input.periodEnd,
 			input.title,
-			JSON.stringify(input.investigated ?? []),
-			JSON.stringify(input.learned ?? []),
-			JSON.stringify(input.completed ?? []),
-			JSON.stringify(input.nextSteps ?? []),
-			JSON.stringify(input.observationIds ?? []),
+			JSON.stringify(input.investigated),
+			JSON.stringify(input.learned),
+			JSON.stringify(input.completed),
+			JSON.stringify(input.nextSteps),
+			JSON.stringify(input.observationIds),
 		);
 		return id;
 	}
 
-	getSummariesByPeriod(
-		scope: Scope,
-		range: { start: string; end: string },
-	): Summary[] {
+	getSummariesByPeriod(scope: Scope, range: { start: string; end: string }): Summary[] {
 		const db = this.getDb();
 		const rows = db
 			.prepare(
@@ -387,10 +367,7 @@ export class MemoryStore {
 		return rows.map(rowToSummary);
 	}
 
-	hasSummaryForPeriod(
-		scope: Scope,
-		range: { start: string; end: string },
-	): boolean {
+	hasSummaryForPeriod(scope: Scope, range: { start: string; end: string }): boolean {
 		const db = this.getDb();
 		const row = db
 			.prepare(
@@ -403,9 +380,7 @@ export class MemoryStore {
 	getRecentSummaries(project: string, limit: number): Summary[] {
 		const db = this.getDb();
 		const rows = db
-			.prepare(
-				"SELECT * FROM summaries WHERE project = ? ORDER BY created_at DESC LIMIT ?",
-			)
+			.prepare("SELECT * FROM summaries WHERE project = ? ORDER BY created_at DESC LIMIT ?")
 			.all(project, limit) as SummaryRow[];
 		return rows.map(rowToSummary);
 	}
@@ -439,10 +414,7 @@ export class MemoryStore {
 		return id;
 	}
 
-	async vectorSearch(
-		queryText: string,
-		limit: number,
-	): Promise<Observation[]> {
+	async vectorSearch(queryText: string, limit: number): Promise<Observation[]> {
 		const db = this.getDb();
 		if (!this.embedder || !this.vecEnabled) {
 			return [];
@@ -462,9 +434,10 @@ export class MemoryStore {
 		return rows.map(rowToObservation);
 	}
 
-	async hybridSearch(query: SearchQuery): Promise<Observation[]> {
+	async hybridSearch(input: SearchInput): Promise<Observation[]> {
 		const db = this.getDb();
-		const limit = query.limit ?? 20;
+		const query = SearchQuerySchema.parse(input);
+		const limit = query.limit;
 
 		// Get FTS5 results
 		const ftsResults = query.query ? this.ftsSearch(db, { ...query, limit: limit * 2 }) : [];
@@ -529,7 +502,7 @@ export class MemoryStore {
 		const params: unknown[] = [];
 
 		conditions.push("observations_fts MATCH ?");
-		params.push(query.query!);
+		params.push(query.query);
 
 		const filterConditions: string[] = [];
 		const filterParams: unknown[] = [];
@@ -573,20 +546,12 @@ export class MemoryStore {
 			LIMIT ? OFFSET ?
 		`;
 
-		const allParams = [
-			...params,
-			...filterParams,
-			query.limit ?? 20,
-			query.offset ?? 0,
-		];
+		const allParams = [...params, ...filterParams, query.limit ?? 20, query.offset ?? 0];
 		const rows = db.prepare(sql).all(...allParams) as ObservationRow[];
 		return rows.map(rowToObservation);
 	}
 
-	private filterSearch(
-		db: Database.Database,
-		query: SearchQuery,
-	): Observation[] {
+	private filterSearch(db: Database.Database, query: SearchQuery): Observation[] {
 		const conditions: string[] = [];
 		const params: unknown[] = [];
 
@@ -615,8 +580,7 @@ export class MemoryStore {
 			params.push(query.toDate);
 		}
 
-		const whereClause =
-			conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+		const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
 		const sql = `SELECT * FROM observations ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`;
 		params.push(query.limit ?? 20, query.offset ?? 0);
