@@ -102,7 +102,7 @@ Honest limitation:
 
 ### Phase 2: Integrations + Real Agents (4-6 weeks)
 
-**Goal**: Connect to real-world services, enable OpenClaw → Claude Code delegation, and run multiple agents. After this phase, you have a personal AI platform where autonomous agents can delegate coding tasks.
+**Goal**: Connect to real-world services, enable OpenClaw → Claude Code delegation, and run multiple agents. After this phase, you have a personal AI platform where autonomous agents can delegate coding tasks. 
 
 | Task | What It Does | LOE |
 |------|-------------|-----|
@@ -129,7 +129,7 @@ Honest limitation:
 
 ```
 OpenClaw Agent (Docker, untrusted)
-    │ manifest: { tool: "delegate.code", task: "PRD content", worktree: "feature-xyz" }
+    │ manifest: { tool: "delegate.code", task: "PRD content → create note", worktree: "feature-xyz" }
     ▼
 Sentinel Executor (Docker, trusted)
     │ classifies as "dangerous" → routes to confirmation
@@ -212,6 +212,7 @@ OpenClaw Agent ← completion signal ← reviews PR
 | Claude Code scope config | Per-session or per-project tool scope restrictions (which MCP tools Claude Code can access) | 2 days |
 | Shared audit schema | `source: "openclaw" | "claude-code"` column in audit log — both write to same Merkle-chained DB | 1 hr |
 | Integration tests | Verify hooks → executor → audit pipeline end-to-end for Claude Code | 4 hr |
+| Install Rampart for Claude Code | This wires Rampart into ~/.claude/settings.json so every tool call (Bash, Read, Write, Edit) goes through Rampart's policy engine before execution. The one thing to watch: rampart setup claude-code may overwrite our existing Sentinel PreToolUse hooks (git-guardrails, session-maintenance, Biome formatting). We'll back up settings.json first and merge the hooks if needed | 2 hr
 
 **Permission model comparison:**
 
