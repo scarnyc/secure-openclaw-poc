@@ -9,7 +9,7 @@ version: "1"
 policies:
   # --- Terraform state files (standard covers .terraform.d/credentials but not tfstate) ---
   - name: sentinel-block-tfstate
-    description: "Block reading Terraform state files which contain infrastructure secrets"
+    description: "Block access to Terraform state files which contain infrastructure secrets"
     match:
       tool: ["read", "exec"]
     rules:
@@ -25,10 +25,10 @@ policies:
         message: "Terraform state files may contain secrets — access blocked by Sentinel policy"
 
   # --- Sentinel data directory protection ---
-  - name: sentinel-protect-vault
-    description: "Prevent agent from reading encrypted vault or audit DB directly"
+  - name: sentinel-protect-data
+    description: "Prevent agent from reading encrypted vault, audit DB, or memory DB directly"
     match:
-      tool: ["read"]
+      tool: ["read", "exec"]
     rules:
       - action: deny
         when:
@@ -39,7 +39,11 @@ policies:
             - "data/audit.db"
             - "**/data/audit.db-*"
             - "data/audit.db-*"
-        message: "Direct access to Sentinel vault/audit data blocked — use the executor API"
+            - "**/data/memory.db"
+            - "data/memory.db"
+            - "**/data/memory.db-*"
+            - "data/memory.db-*"
+        message: "Direct access to Sentinel vault/audit/memory data blocked — use the executor API"
 
   # --- Protect Sentinel security-critical source files from agent modification ---
   - name: sentinel-protect-security-code
@@ -58,10 +62,20 @@ policies:
             - "packages/audit/src/**"
             - "**/packages/types/src/credential-patterns.ts"
             - "packages/types/src/credential-patterns.ts"
-            - "**/packages/executor/src/middleware/auth*"
-            - "packages/executor/src/middleware/auth*"
+            - "**/packages/executor/src/auth-middleware*"
+            - "packages/executor/src/auth-middleware*"
+            - "**/packages/executor/src/credential-filter*"
+            - "packages/executor/src/credential-filter*"
+            - "**/packages/executor/src/ssrf-guard*"
+            - "packages/executor/src/ssrf-guard*"
+            - "**/packages/executor/src/pii-scrubber*"
+            - "packages/executor/src/pii-scrubber*"
             - "**/packages/executor/src/tools/deny-list.ts"
             - "packages/executor/src/tools/deny-list.ts"
+            - "**/packages/executor/src/tools/path-guard*"
+            - "packages/executor/src/tools/path-guard*"
+            - "**/packages/memory/src/validator*"
+            - "packages/memory/src/validator*"
             - "**/sentinel/manifests/**"
             - "sentinel/manifests/**"
         message: "Modifying Sentinel security-critical code — confirm this change is intentional"

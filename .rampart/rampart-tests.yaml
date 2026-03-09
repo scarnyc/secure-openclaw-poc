@@ -103,7 +103,12 @@ tests:
     input: "infra/terraform.tfstate.backup"
     expect: deny
 
-  # === SENTINEL PROJECT POLICY: Vault/audit protection ===
+  - name: "blocks terraform state file via exec"
+    tool: exec
+    input: "cat .terraform/terraform.tfstate"
+    expect: deny
+
+  # === SENTINEL PROJECT POLICY: Vault/audit/memory protection ===
   - name: "blocks direct vault.enc read"
     tool: read
     input: "data/vault.enc"
@@ -112,6 +117,31 @@ tests:
   - name: "blocks direct audit.db read"
     tool: read
     input: "data/audit.db"
+    expect: deny
+
+  - name: "blocks audit.db-wal read"
+    tool: read
+    input: "data/audit.db-wal"
+    expect: deny
+
+  - name: "blocks direct memory.db read"
+    tool: read
+    input: "data/memory.db"
+    expect: deny
+
+  - name: "blocks memory.db-wal read"
+    tool: read
+    input: "data/memory.db-wal"
+    expect: deny
+
+  - name: "blocks cat vault.enc via exec"
+    tool: exec
+    input: "cat data/vault.enc"
+    expect: deny
+
+  - name: "blocks sqlite3 dump of audit.db via exec"
+    tool: exec
+    input: "sqlite3 data/audit.db .dump"
     expect: deny
 
   # === SENTINEL PROJECT POLICY: Security code review gate ===
@@ -129,6 +159,41 @@ tests:
     tool: write
     input: "packages/executor/src/tools/deny-list.ts"
     expect: ask
+
+  - name: "asks before modifying auth middleware"
+    tool: edit
+    input: "packages/executor/src/auth-middleware.ts"
+    expect: ask
+
+  - name: "asks before modifying ssrf guard"
+    tool: edit
+    input: "packages/executor/src/ssrf-guard.ts"
+    expect: ask
+
+  - name: "asks before modifying pii scrubber"
+    tool: edit
+    input: "packages/executor/src/pii-scrubber.ts"
+    expect: ask
+
+  - name: "asks before modifying credential filter"
+    tool: edit
+    input: "packages/executor/src/credential-filter.ts"
+    expect: ask
+
+  - name: "asks before modifying path guard"
+    tool: edit
+    input: "packages/executor/src/tools/path-guard.ts"
+    expect: ask
+
+  - name: "asks before modifying memory validator"
+    tool: edit
+    input: "packages/memory/src/validator.ts"
+    expect: ask
+
+  - name: "allows reading security code"
+    tool: read
+    input: "packages/crypto/src/vault.ts"
+    expect: allow
 
   # === STANDARD POLICY: Shell evasion (backslash stripping) ===
   - name: "blocks backslash-escaped rm"

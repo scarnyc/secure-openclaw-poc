@@ -73,7 +73,7 @@ sentinel chat     # Start interactive agent session with TUI confirmation
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
 | `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 6 security invariants |
 | `.claude/skills/upstream-sync/SKILL.md` | `/upstream-sync` skill — rebase on moltworker (user-only) |
-| `.rampart/policy.yaml` | Host-level Rampart firewall policy (tfstate, vault, security code gate) |
+| `.rampart/policy.yaml` | Host-level Rampart firewall policy (tfstate, data protection, security code gate) |
 
 
 ## Architecture
@@ -236,8 +236,7 @@ API keys stored in encrypted vault via `sentinel init`. Local dev uses `.dev.var
 ## Automations
 
 ### Hooks (`.claude/settings.json`)
-- **PreToolUse** (evaluated in order): (1) Rampart hook — policy firewall on all tools (`.*`), (2) git-guardrails — Bash-only
-- **PostToolUseFailure**: Rampart hook — logs denied/failed tool calls
+- **PreToolUse**: (1) Rampart daemon — host-level policy firewall on all tools (runs as launchd service, not a Claude hook), (2) `Edit|Write` hook — blocks edits to `.dev.vars`/`.env` files
 - **PostToolUse**: Auto-formats `.ts/.tsx` with Biome on every edit
 
 ### Skills
