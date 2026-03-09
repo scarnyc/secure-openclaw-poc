@@ -1,0 +1,67 @@
+# Sentinel project policy — applied on top of Rampart's standard policy.
+# Only contains NET-NEW rules not covered by the 45 standard policies.
+# Standard policy already covers: SSH keys, AWS/GCP/Azure creds, env injection,
+# destructive commands, macOS keychain, browser data, exfil domains, etc.
+#
+# Docs: https://docs.rampart.sh/features/policy-engine/#project-policies
+version: "1"
+
+policies:
+  # --- Terraform state files (standard covers .terraform.d/credentials but not tfstate) ---
+  - name: sentinel-block-tfstate
+    description: "Block reading Terraform state files which contain infrastructure secrets"
+    match:
+      tool: ["read", "exec"]
+    rules:
+      - action: deny
+        when:
+          path_matches:
+            - "**/.terraform/*.tfstate"
+            - ".terraform/*.tfstate"
+            - "**/*.tfstate"
+            - "*.tfstate"
+            - "**/*.tfstate.backup"
+            - "*.tfstate.backup"
+        message: "Terraform state files may contain secrets — access blocked by Sentinel policy"
+
+  # --- Sentinel data directory protection ---
+  - name: sentinel-protect-vault
+    description: "Prevent agent from reading encrypted vault or audit DB directly"
+    match:
+      tool: ["read"]
+    rules:
+      - action: deny
+        when:
+          path_matches:
+            - "**/data/vault.enc"
+            - "data/vault.enc"
+            - "**/data/audit.db"
+            - "data/audit.db"
+            - "**/data/audit.db-*"
+            - "data/audit.db-*"
+        message: "Direct access to Sentinel vault/audit data blocked — use the executor API"
+
+  # --- Protect Sentinel security-critical source files from agent modification ---
+  - name: sentinel-protect-security-code
+    description: "Require approval before modifying Sentinel security invariant implementations"
+    match:
+      tool: ["write", "edit"]
+    rules:
+      - action: ask
+        when:
+          path_matches:
+            - "**/packages/crypto/src/**"
+            - "packages/crypto/src/**"
+            - "**/packages/policy/src/**"
+            - "packages/policy/src/**"
+            - "**/packages/audit/src/**"
+            - "packages/audit/src/**"
+            - "**/packages/types/src/credential-patterns.ts"
+            - "packages/types/src/credential-patterns.ts"
+            - "**/packages/executor/src/middleware/auth*"
+            - "packages/executor/src/middleware/auth*"
+            - "**/packages/executor/src/tools/deny-list.ts"
+            - "packages/executor/src/tools/deny-list.ts"
+            - "**/sentinel/manifests/**"
+            - "sentinel/manifests/**"
+        message: "Modifying Sentinel security-critical code — confirm this change is intentional"

@@ -1,0 +1,148 @@
+# Rampart acceptance tests for Sentinel project policy + standard policy
+# Run: rampart test .rampart/rampart-tests.yaml
+version: "1"
+
+tests:
+  # === STANDARD POLICY: Credential file access ===
+  - name: "blocks SSH private key read"
+    tool: read
+    input: "~/.ssh/id_rsa"
+    expect: deny
+
+  - name: "blocks AWS credentials read"
+    tool: read
+    input: "~/.aws/credentials"
+    expect: deny
+
+  - name: "blocks .env file read"
+    tool: read
+    input: "/app/.env"
+    expect: deny
+
+  - name: "allows .env.example read"
+    tool: read
+    input: "/app/.env.example"
+    expect: allow
+
+  # === STANDARD POLICY: Env var injection ===
+  - name: "blocks LD_PRELOAD injection"
+    tool: exec
+    input: "LD_PRELOAD=/tmp/evil.so ls"
+    expect: deny
+
+  - name: "blocks DYLD_INSERT_LIBRARIES injection"
+    tool: exec
+    input: "DYLD_INSERT_LIBRARIES=/tmp/evil.dylib ls"
+    expect: deny
+
+  - name: "blocks BASH_ENV injection"
+    tool: exec
+    input: "BASH_ENV=/tmp/evil.sh bash"
+    expect: deny
+
+  # === STANDARD POLICY: Destructive commands ===
+  - name: "blocks rm -rf /"
+    tool: exec
+    input: "rm -rf /"
+    expect: deny
+
+  - name: "blocks fdisk"
+    tool: exec
+    input: "fdisk /dev/disk0"
+    expect: deny
+
+  - name: "blocks fork bomb"
+    tool: exec
+    input: ":(){ :|:& };:"
+    expect: deny
+
+  - name: "blocks halt"
+    tool: exec
+    input: "halt"
+    expect: deny
+
+  - name: "blocks poweroff"
+    tool: exec
+    input: "poweroff"
+    expect: deny
+
+  # === STANDARD POLICY: No false positives ===
+  - name: "allows ls -la"
+    tool: exec
+    input: "ls -la"
+    expect: allow
+
+  - name: "allows git status"
+    tool: exec
+    input: "git status"
+    expect: allow
+
+  - name: "allows reading source code"
+    tool: read
+    input: "packages/types/src/index.ts"
+    expect: allow
+
+  - name: "allows pnpm test"
+    tool: exec
+    input: "pnpm test"
+    expect: allow
+
+  - name: "allows pnpm build"
+    tool: exec
+    input: "pnpm build"
+    expect: allow
+
+  # === SENTINEL PROJECT POLICY: Terraform state ===
+  - name: "blocks terraform state file read"
+    tool: read
+    input: ".terraform/terraform.tfstate"
+    expect: deny
+
+  - name: "blocks tfstate backup read"
+    tool: read
+    input: "infra/terraform.tfstate.backup"
+    expect: deny
+
+  # === SENTINEL PROJECT POLICY: Vault/audit protection ===
+  - name: "blocks direct vault.enc read"
+    tool: read
+    input: "data/vault.enc"
+    expect: deny
+
+  - name: "blocks direct audit.db read"
+    tool: read
+    input: "data/audit.db"
+    expect: deny
+
+  # === SENTINEL PROJECT POLICY: Security code review gate ===
+  - name: "asks before modifying credential patterns"
+    tool: write
+    input: "packages/types/src/credential-patterns.ts"
+    expect: ask
+
+  - name: "asks before modifying crypto package"
+    tool: edit
+    input: "packages/crypto/src/vault.ts"
+    expect: ask
+
+  - name: "asks before modifying deny-list"
+    tool: write
+    input: "packages/executor/src/tools/deny-list.ts"
+    expect: ask
+
+  # === STANDARD POLICY: Shell evasion (backslash stripping) ===
+  - name: "blocks backslash-escaped rm"
+    tool: exec
+    input: "\\rm -rf /"
+    expect: deny
+
+  # === STANDARD POLICY: Self-modification protection ===
+  - name: "blocks rampart policy modification"
+    tool: exec
+    input: "rampart allow 'rm -rf'"
+    expect: deny
+
+  - name: "blocks rampart setup"
+    tool: exec
+    input: "rampart setup claude-code"
+    expect: deny
