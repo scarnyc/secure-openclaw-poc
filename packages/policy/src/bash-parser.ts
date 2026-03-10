@@ -96,7 +96,13 @@ function hasSensitivePath(command: string): boolean {
 }
 
 function hasSubshell(command: string): boolean {
-	return /`[^`]+`/.test(command) || /\$\([^)]+\)/.test(command);
+	// Backtick subshell: `...`
+	const bt = command.indexOf("`");
+	if (bt !== -1 && command.indexOf("`", bt + 1) > bt) return true;
+	// $() subshell: check for $( followed by )
+	const dp = command.indexOf("$(");
+	if (dp !== -1 && command.indexOf(")", dp + 2) > dp) return true;
+	return false;
 }
 
 function classifySingleCommand(command: string): ActionCategory {
