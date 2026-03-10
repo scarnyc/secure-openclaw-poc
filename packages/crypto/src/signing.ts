@@ -1,9 +1,9 @@
 import {
 	createPrivateKey,
 	createPublicKey,
-	generateKeyPairSync,
 	sign as cryptoSign,
 	verify as cryptoVerify,
+	generateKeyPairSync,
 } from "node:crypto";
 
 /**
