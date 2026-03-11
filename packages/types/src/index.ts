@@ -16,6 +16,10 @@ export {
 export {
 	type ClassificationOverride,
 	ClassificationOverrideSchema,
+	type GwsAgentScope,
+	GwsAgentScopeSchema,
+	type GwsAgentScopes,
+	GwsAgentScopesSchema,
 	type McpServerConfig,
 	McpServerConfigSchema,
 	type SentinelConfig,

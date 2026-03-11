@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { CredentialVault } from "@sentinel/crypto";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createLlmProxyHandler, handleLlmProxy } from "./llm-proxy.js";
+import { createLlmProxyHandler } from "./llm-proxy.js";
 
 // Mock SSRF guard — real DNS resolution is unreliable in tests
 vi.mock("./ssrf-guard.js", () => ({
@@ -21,7 +21,7 @@ let app: Hono;
 
 beforeEach(() => {
 	app = new Hono();
-	app.all("/proxy/llm/*", handleLlmProxy);
+	app.all("/proxy/llm/*", createLlmProxyHandler());
 	process.env.ANTHROPIC_API_KEY = "sk-ant-test-key";
 	process.env.OPENAI_API_KEY = "sk-test-openai-key";
 	process.env.GEMINI_API_KEY = "AIzaSyDtestkey123456789012345678901234";
@@ -291,12 +291,12 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		vault.destroy();
 	});
 
-	it("handleLlmProxy backward compat still uses env vars", async () => {
-		// handleLlmProxy (no vault) should still work with env
+	it("createLlmProxyHandler without vault still uses env vars", async () => {
+		// No vault provided — should fall back to env vars
 		process.env.ANTHROPIC_API_KEY = "sk-ant-compat-key";
 
 		const legacyApp = new Hono();
-		legacyApp.all("/proxy/llm/*", handleLlmProxy);
+		legacyApp.all("/proxy/llm/*", createLlmProxyHandler());
 
 		const mockResponse = new Response("{}", { status: 200 });
 		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);

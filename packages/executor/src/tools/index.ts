@@ -1,3 +1,4 @@
+import type { GwsAgentScopes } from "@sentinel/types";
 import { z } from "zod";
 import { executeBash } from "./bash.js";
 import { executeEditFile } from "./edit-file.js";
@@ -43,7 +44,10 @@ const GwsParamsSchema = z.object({
 	sanitize: z.boolean().optional(),
 });
 
-export function createToolRegistry(allowedRoots?: readonly string[]): ToolRegistry {
+export function createToolRegistry(
+	allowedRoots?: readonly string[],
+	gwsScopes?: GwsAgentScopes,
+): ToolRegistry {
 	const registry = new ToolRegistry();
 
 	registry.registerBuiltin("bash", (params, manifestId) => {
@@ -66,9 +70,10 @@ export function createToolRegistry(allowedRoots?: readonly string[]): ToolRegist
 		return executeEditFile(parsed, manifestId, allowedRoots);
 	});
 
-	registry.registerBuiltin("gws", (params, manifestId) => {
+	// SENTINEL: G4 — per-agent GWS scope restriction via closure-captured scopes
+	registry.registerBuiltin("gws", (params, manifestId, agentId) => {
 		const parsed = GwsParamsSchema.parse(params);
-		return executeGws(parsed, manifestId);
+		return executeGws(parsed, manifestId, agentId, gwsScopes);
 	});
 
 	return registry;

@@ -1,10 +1,11 @@
 import type { AuditLogger } from "@sentinel/audit";
+import type { CredentialVault } from "@sentinel/crypto";
 import { LoopGuard, RateLimiter } from "@sentinel/policy";
 import type { ActionManifest, AgentCard, PolicyDecision, SentinelConfig } from "@sentinel/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createAuthMiddleware } from "./auth-middleware.js";
-import { handleLlmProxy } from "./llm-proxy.js";
+import { createLlmProxyHandler } from "./llm-proxy.js";
 import { requestIdMiddleware } from "./request-id.js";
 import {
 	type ConfirmFn,
@@ -41,6 +42,7 @@ export function createApp(
 	config: SentinelConfig,
 	auditLogger: AuditLogger,
 	registry: ToolRegistry,
+	vault?: CredentialVault,
 ): Hono {
 	const app = new Hono();
 	const pendingConfirmations = new Map<string, PendingConfirmation>();
@@ -99,7 +101,8 @@ export function createApp(
 		return c.json(pending);
 	});
 
-	app.all("/proxy/llm/*", handleLlmProxy);
+	// SENTINEL: Vault-based key injection when available, env var fallback otherwise
+	app.all("/proxy/llm/*", createLlmProxyHandler(vault));
 
 	app.post("/execute", async (c) => {
 		try {

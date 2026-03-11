@@ -192,7 +192,7 @@ export async function handleExecute(
 		};
 	}
 
-	const rawResult = await handler(manifest.parameters, manifest.id);
+	const rawResult = await handler(manifest.parameters, manifest.id, manifest.agentId);
 
 	// 8. Filter credentials from tool output before it reaches the agent
 	const credFiltered = filterCredentials(rawResult);

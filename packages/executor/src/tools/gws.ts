@@ -1,4 +1,4 @@
-import { GWS_READ_PATTERNS, type ToolResult } from "@sentinel/types";
+import { GWS_READ_PATTERNS, type GwsAgentScopes, type ToolResult } from "@sentinel/types";
 import { execa } from "execa";
 import { moderateEmail } from "../moderation/email-scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
@@ -29,13 +29,7 @@ export interface GwsParams {
 	sanitize?: boolean;
 }
 
-/** Per-agent scope restriction for GWS services. */
-export interface GwsAgentScope {
-	allowedServices?: string[];
-	denyServices?: string[];
-}
-
-export type GwsAgentScopes = Record<string, GwsAgentScope>;
+export type { GwsAgentScopes } from "@sentinel/types";
 
 export async function executeGws(
 	params: GwsParams,

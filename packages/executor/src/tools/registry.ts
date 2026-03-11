@@ -3,6 +3,7 @@ import type { ToolRegistryEntry, ToolResult } from "@sentinel/types";
 export type ToolHandler = (
 	params: Record<string, unknown>,
 	manifestId: string,
+	agentId?: string,
 ) => Promise<ToolResult>;
 
 export class ToolRegistry {

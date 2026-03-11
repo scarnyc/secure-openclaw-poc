@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { AuditLogger } from "@sentinel/audit";
+import { CredentialVault } from "@sentinel/crypto";
 import { getDefaultConfig, validateConfig } from "@sentinel/policy";
 import { createApp } from "./server.js";
 import { createToolRegistry } from "./tools/index.js";
@@ -19,8 +20,24 @@ try {
 const config = Object.freeze(structuredClone(validated));
 
 const auditLogger = new AuditLogger(config.auditLogPath);
-const registry = createToolRegistry(config.allowedRoots);
-const app = createApp(config, auditLogger, registry);
+const registry = createToolRegistry(config.allowedRoots, config.gwsAgentScopes);
+
+// SENTINEL: Open vault for Buffer-based credential injection (G1 fix).
+// Falls back gracefully — LLM proxy uses process.env when vault is unavailable.
+let vault: CredentialVault | undefined;
+const vaultPassword = process.env.SENTINEL_VAULT_PASSWORD;
+if (vaultPassword && config.vaultPath) {
+	try {
+		vault = await CredentialVault.open(config.vaultPath, vaultPassword);
+		console.log("[sentinel] Vault opened — LLM proxy will use vault-based credentials");
+	} catch (err) {
+		console.warn(
+			`[sentinel] Vault open failed — falling back to env vars: ${err instanceof Error ? err.message : "Unknown"}`,
+		);
+	}
+}
+
+const app = createApp(config, auditLogger, registry, vault);
 
 const port = config.executor.port;
 const host = "0.0.0.0";

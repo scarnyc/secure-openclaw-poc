@@ -46,8 +46,15 @@ function getKeyFromVault(vault: CredentialVault, targetHost: string): string | u
 		} finally {
 			buf.fill(0);
 		}
-	} catch {
-		// Key not in vault — caller should fall back to env
+	} catch (error) {
+		// "No credential found" = key not stored yet → fall back to env.
+		// Anything else (DecryptionError, JSON parse failure) = vault corruption → log and fail.
+		if (error instanceof Error && error.message.startsWith("No credential found")) {
+			return undefined;
+		}
+		console.error(
+			`[llm-proxy] Vault retrieval failed for ${serviceId}: credential corrupted or inaccessible`,
+		);
 		return undefined;
 	}
 }
@@ -154,6 +161,3 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 	};
 }
-
-/** Backward-compatible handler using env vars only (no vault). */
-export const handleLlmProxy = createLlmProxyHandler();

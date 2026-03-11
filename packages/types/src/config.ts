@@ -32,6 +32,15 @@ export const ToolRegistryEntrySchema = z.object({
 });
 export type ToolRegistryEntry = z.infer<typeof ToolRegistryEntrySchema>;
 
+export const GwsAgentScopeSchema = z.object({
+	allowedServices: z.array(z.string().min(1)).optional(),
+	denyServices: z.array(z.string().min(1)).optional(),
+});
+export type GwsAgentScope = z.infer<typeof GwsAgentScopeSchema>;
+
+export const GwsAgentScopesSchema = z.record(z.string(), GwsAgentScopeSchema);
+export type GwsAgentScopes = z.infer<typeof GwsAgentScopesSchema>;
+
 export const SentinelConfigSchema = z.object({
 	executor: z.object({
 		port: z.number().int().positive(),
@@ -44,6 +53,7 @@ export const SentinelConfigSchema = z.object({
 	mcpServers: z.array(McpServerConfigSchema).optional(),
 	allowedRoots: z.array(z.string().min(1)).optional(),
 	authToken: z.string().min(1).optional(),
+	gwsAgentScopes: GwsAgentScopesSchema.optional(),
 	llm: z.object({
 		provider: z.literal("anthropic"),
 		model: z.string().min(1),

@@ -49,14 +49,23 @@ export function decryptToBuffer(
 	const ivBuf = Buffer.from(iv, "base64");
 	const authTagBuf = Buffer.from(authTag, "base64");
 	const ciphertextBuf = Buffer.from(ciphertext, "base64");
+	let partial: Buffer | undefined;
 	try {
 		const decipher = createDecipheriv(ALGORITHM, key, ivBuf);
 		decipher.setAuthTag(authTagBuf);
-		return Buffer.concat([decipher.update(ciphertextBuf), decipher.final()]);
+		partial = decipher.update(ciphertextBuf);
+		const final = decipher.final();
+		const result = Buffer.concat([partial, final]);
+		// Zero intermediates now that we have the combined result
+		partial.fill(0);
+		final.fill(0);
+		return result;
 	} catch (err) {
 		if (err instanceof DecryptionError) throw err;
 		throw new DecryptionError();
 	} finally {
+		// Zero partial decrypted data if final() threw (auth tag mismatch)
+		if (partial) partial.fill(0);
 		ivBuf.fill(0);
 		authTagBuf.fill(0);
 		ciphertextBuf.fill(0);
@@ -73,7 +82,7 @@ export function decrypt(key: Buffer, iv: string, authTag: string, ciphertext: st
 		const decrypted = Buffer.concat([decipher.update(ciphertextBuf), decipher.final()]);
 		try {
 			// S2: Return value is a V8 immutable string — cannot be zeroed from memory.
-			// Callers must minimize retention time. Vault-based Buffer keys planned for Phase 1.
+			// Callers needing zeroable output should use decryptToBuffer() instead.
 			return decrypted.toString("utf8");
 		} finally {
 			decrypted.fill(0);
