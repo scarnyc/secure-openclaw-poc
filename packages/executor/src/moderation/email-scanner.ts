@@ -110,15 +110,12 @@ const DETECTION_PATTERNS: DetectionPattern[] = [
 		severity: "high",
 	},
 
-	// SMTP header injection (high severity)
+	// SMTP header injection — only detects CRLF injection (outbound construction).
+	// Bare LF patterns removed: they false-positive on inbound email bodies where
+	// forwarded/quoted headers (From:, To:, Subject:) are legitimate content.
 	{
 		pattern: /\r\n(To|CC|BCC|Subject|From)\s*:/i,
 		name: "smtp_header_injection_crlf",
-		severity: "high",
-	},
-	{
-		pattern: /(?<!\r)\n(To|CC|BCC|Subject|From)\s*:/i,
-		name: "smtp_header_injection_lf",
 		severity: "high",
 	},
 ];

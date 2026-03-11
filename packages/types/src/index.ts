@@ -31,6 +31,13 @@ export {
 	redactPII,
 } from "./credential-patterns.js";
 export {
+	CALENDAR_CREATE_PATTERNS,
+	GMAIL_SEND_PATTERNS,
+	GWS_DELETE_PATTERNS,
+	GWS_READ_PATTERNS,
+	GWS_WRITE_PATTERNS,
+} from "./gws-patterns.js";
+export {
 	type ActionCategory,
 	ActionCategorySchema,
 	type ActionManifest,

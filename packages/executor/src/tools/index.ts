@@ -29,8 +29,16 @@ const EditFileParamsSchema = z.object({
 });
 
 const GwsParamsSchema = z.object({
-	service: z.string().min(1),
-	method: z.string().min(1),
+	service: z
+		.string()
+		.min(1)
+		.max(64)
+		.regex(/^[a-z][a-zA-Z0-9_-]*$/, "Invalid service name"),
+	method: z
+		.string()
+		.min(1)
+		.max(256)
+		.regex(/^[a-zA-Z][a-zA-Z0-9_.]*$/, "Invalid method name"),
 	args: z.record(z.unknown()).optional(),
 	sanitize: z.boolean().optional(),
 });

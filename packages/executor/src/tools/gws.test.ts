@@ -108,6 +108,16 @@ describe("executeGws", () => {
 		expect(result.error).toContain("gws CLI not found");
 	});
 
+	it("generic catch returns fixed error string — never exposes error.message", async () => {
+		const err = new Error("OAuth token ya29.secret123 expired for user");
+		mockExeca.mockRejectedValue(err);
+		const result = await executeGws(makeParams(), "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toBe("gws execution failed");
+		expect(result.error).not.toContain("ya29");
+		expect(result.error).not.toContain("OAuth");
+	});
+
 	it("strips sensitive env vars before spawning", async () => {
 		process.env.SENTINEL_SECRET = "bad";
 		process.env.ANTHROPIC_API_KEY = "bad";

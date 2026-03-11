@@ -1,4 +1,4 @@
-import type { ToolResult } from "@sentinel/types";
+import { GWS_READ_PATTERNS, type ToolResult } from "@sentinel/types";
 import { execa } from "execa";
 import { moderateEmail } from "../moderation/email-scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
@@ -28,8 +28,6 @@ export interface GwsParams {
 	args?: Record<string, unknown>;
 	sanitize?: boolean;
 }
-
-export const GWS_READ_PATTERNS = /\b(list|get|search|watch)\b/;
 
 export async function executeGws(params: GwsParams, manifestId: string): Promise<ToolResult> {
 	const start = Date.now();
@@ -63,9 +61,10 @@ export async function executeGws(params: GwsParams, manifestId: string): Promise
 			};
 		}
 
-		let output = result.stdout ? truncateBashOutput(result.stdout) : undefined;
+		let output = result.stdout;
 
-		// Email scanning: only scan gmail read operations (inbound email is untrusted)
+		// Email scanning: scan FULL output before truncation (inbound email is untrusted).
+		// Scanning after truncation would let payloads at the boundary bypass detection.
 		if (output && params.service === "gmail" && GWS_READ_PATTERNS.test(params.method)) {
 			const emailModeration = moderateEmail(output);
 			if (emailModeration.blocked && emailModeration.sanitizedOutput) {
@@ -73,10 +72,13 @@ export async function executeGws(params: GwsParams, manifestId: string): Promise
 			}
 		}
 
+		// Truncate after scanning to bound output size for the agent
+		const truncatedOutput = output ? truncateBashOutput(output) : undefined;
+
 		return {
 			manifestId,
 			success: true,
-			output,
+			output: truncatedOutput,
 			duration_ms: Date.now() - start,
 		};
 	} catch (error) {
@@ -94,10 +96,11 @@ export async function executeGws(params: GwsParams, manifestId: string): Promise
 			};
 		}
 
+		// Never include raw error.message — may contain credentials or tokens
 		return {
 			manifestId,
 			success: false,
-			error: error instanceof Error ? error.message : "Unknown error",
+			error: "gws execution failed",
 			duration_ms: Date.now() - start,
 		};
 	}

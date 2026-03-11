@@ -101,11 +101,17 @@ describe("scanEmailContent", () => {
 			expect(result.patterns).toContain("smtp_header_injection_crlf");
 		});
 
-		it("detects bare LF + To injection", () => {
-			const text = "Normal text\nTo: attacker@evil.com";
+		it("does not flag bare LF + To (legitimate in inbound email bodies)", () => {
+			const text = "Normal text\nTo: alice@example.com";
 			const result = scanEmailContent(text);
-			expect(result.flagged).toBe(true);
-			expect(result.patterns).toContain("smtp_header_injection_lf");
+			expect(result.flagged).toBe(false);
+		});
+
+		it("does not flag forwarded email headers in body", () => {
+			const text =
+				"---------- Forwarded message ----------\nFrom: bob@example.com\nTo: alice@example.com\nSubject: Q2 review";
+			const result = scanEmailContent(text);
+			expect(result.flagged).toBe(false);
 		});
 	});
 
