@@ -324,4 +324,94 @@ describe("classify", () => {
 			expect(result.reason).toContain("irreversible");
 		});
 	});
+
+	describe("GWS classification rules", () => {
+		it("gmail users.messages.list → read", () => {
+			const result = classify(
+				makeManifest("gws", { service: "gmail", method: "users.messages.list" }),
+				config,
+			);
+			expect(result.category).toBe("read");
+		});
+
+		it("gmail users.messages.get → read", () => {
+			const result = classify(
+				makeManifest("gws", { service: "gmail", method: "users.messages.get" }),
+				config,
+			);
+			expect(result.category).toBe("read");
+		});
+
+		it("gmail users.drafts.send → write-irreversible", () => {
+			const result = classify(
+				makeManifest("gws", { service: "gmail", method: "users.drafts.send" }),
+				config,
+			);
+			expect(result.category).toBe("write-irreversible");
+		});
+
+		it("calendar events.list → read", () => {
+			const result = classify(
+				makeManifest("gws", { service: "calendar", method: "events.list" }),
+				config,
+			);
+			expect(result.category).toBe("read");
+		});
+
+		it("calendar events.insert without attendees → write", () => {
+			const result = classify(
+				makeManifest("gws", { service: "calendar", method: "events.insert" }),
+				config,
+			);
+			expect(result.category).toBe("write");
+		});
+
+		it("drive files.create → write", () => {
+			const result = classify(
+				makeManifest("gws", { service: "drive", method: "files.create" }),
+				config,
+			);
+			expect(result.category).toBe("write");
+		});
+
+		it("drive files.delete → dangerous", () => {
+			const result = classify(
+				makeManifest("gws", { service: "drive", method: "files.delete" }),
+				config,
+			);
+			expect(result.category).toBe("dangerous");
+		});
+
+		it("drive files.list → read", () => {
+			const result = classify(
+				makeManifest("gws", { service: "drive", method: "files.list" }),
+				config,
+			);
+			expect(result.category).toBe("read");
+		});
+
+		it("sheets spreadsheets.create → write", () => {
+			const result = classify(
+				makeManifest("gws", { service: "sheets", method: "spreadsheets.create" }),
+				config,
+			);
+			expect(result.category).toBe("write");
+		});
+
+		it("gmail users.messages.trash → dangerous", () => {
+			const result = classify(
+				makeManifest("gws", { service: "gmail", method: "users.messages.trash" }),
+				config,
+			);
+			expect(result.category).toBe("dangerous");
+		});
+
+		it("unknown service + unknown method → falls through to default write", () => {
+			const result = classify(
+				makeManifest("gws", { service: "unknown", method: "unknown.action" }),
+				config,
+			);
+			expect(result.category).toBe("write");
+		});
+	});
 });

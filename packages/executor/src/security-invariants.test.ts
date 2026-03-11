@@ -156,6 +156,144 @@ describe("Security Invariant #3: Blocked tool categories enforced", () => {
 	});
 });
 
+describe("GWS pipeline integration", () => {
+	it("credential filter strips ya29.* Google OAuth tokens from gws output", async () => {
+		const manifest = makeManifest({
+			tool: "bash",
+			parameters: {
+				command: "echo 'token: ya29.a0ARrdaM8_Wn3EfCnXoP_abc123-def456'",
+			},
+		});
+		const res = await postExecute(app, manifest);
+		const result = (await res.json()) as ToolResult;
+		expect(result.success).toBe(true);
+		expect(result.output).not.toContain("ya29.");
+		expect(result.output).toContain("[REDACTED]");
+	});
+
+	it("audit entry logged for gws tool call (Invariant #2)", async () => {
+		// Register a mock gws handler that returns controlled output
+		registry.registerBuiltin("gws", async (_params, manifestId) => ({
+			manifestId,
+			success: true,
+			output: '{"messages":[]}',
+			duration_ms: 1,
+		}));
+
+		const manifest = makeManifest({
+			tool: "gws",
+			parameters: { service: "gmail", method: "users.messages.list" },
+		});
+		const res = await postExecute(app, manifest);
+		const result = (await res.json()) as ToolResult;
+		expect(result.success).toBe(true);
+
+		const entries = auditLogger.getRecent(100);
+		const match = entries.find((e) => e.manifestId === manifest.id);
+		expect(match, "audit entry for gws call").toBeDefined();
+		expect(match!.tool).toBe("gws");
+	});
+
+	it("gws gmail.send classified as write-irreversible routes to confirmation", async () => {
+		registry.registerBuiltin("gws", async (_params, manifestId) => ({
+			manifestId,
+			success: true,
+			output: '{"id":"msg123"}',
+			duration_ms: 1,
+		}));
+
+		const manifest = makeManifest({
+			tool: "gws",
+			parameters: { service: "gmail", method: "users.messages.send" },
+		});
+
+		// Don't await — it will block on confirmation. Use a race with confirm.
+		const executePromise = postExecute(app, manifest);
+
+		// Wait briefly for the confirmation to be registered
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		// Deny the confirmation
+		const confirmRes = await app.request(`/confirm/${manifest.id}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ approved: false }),
+		});
+		expect(confirmRes.status).toBe(200);
+
+		const result = (await executePromise.then((r) => r.json())) as ToolResult;
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("Denied by user");
+	});
+
+	it("gws drive.files.list classified as read auto-approves", async () => {
+		registry.registerBuiltin("gws", async (_params, manifestId) => ({
+			manifestId,
+			success: true,
+			output: '{"files":[]}',
+			duration_ms: 1,
+		}));
+
+		const manifest = makeManifest({
+			tool: "gws",
+			parameters: { service: "drive", method: "files.list" },
+		});
+		const res = await postExecute(app, manifest);
+		const result = (await res.json()) as ToolResult;
+		// autoApproveReadOps=true in DEFAULT_CONFIG, so read should auto-approve
+		expect(result.success).toBe(true);
+	});
+
+	it("gws drive.files.delete classified as dangerous routes to confirmation", async () => {
+		registry.registerBuiltin("gws", async (_params, manifestId) => ({
+			manifestId,
+			success: true,
+			output: "{}",
+			duration_ms: 1,
+		}));
+
+		const manifest = makeManifest({
+			tool: "gws",
+			parameters: { service: "drive", method: "files.delete" },
+		});
+
+		const executePromise = postExecute(app, manifest);
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		// Approve and execute
+		await app.request(`/confirm/${manifest.id}`, {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ approved: true }),
+		});
+
+		const result = (await executePromise.then((r) => r.json())) as ToolResult;
+		expect(result.success).toBe(true);
+
+		const entries = auditLogger.getRecent(100);
+		const match = entries.find((e) => e.manifestId === manifest.id);
+		expect(match!.category).toBe("dangerous");
+	});
+
+	it("gws errors return structured error (not raw stderr)", async () => {
+		registry.registerBuiltin("gws", async (_params, manifestId) => ({
+			manifestId,
+			success: false,
+			error: "gws exited with code 1",
+			duration_ms: 1,
+		}));
+
+		const manifest = makeManifest({
+			tool: "gws",
+			parameters: { service: "gmail", method: "users.messages.list" },
+		});
+		const res = await postExecute(app, manifest);
+		const result = (await res.json()) as ToolResult;
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("code 1");
+	});
+});
+
 describe("Security Invariant #6: Policy changes require restart", () => {
 	it("config mutation after createApp has no effect on classification", async () => {
 		const config = structuredClone(DEFAULT_CONFIG);

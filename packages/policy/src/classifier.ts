@@ -5,6 +5,13 @@ import type {
 	SentinelConfig,
 	ToolClassification,
 } from "@sentinel/types";
+import {
+	CALENDAR_CREATE_PATTERNS,
+	GMAIL_SEND_PATTERNS,
+	GWS_DELETE_PATTERNS,
+	GWS_READ_PATTERNS,
+	GWS_WRITE_PATTERNS,
+} from "@sentinel/types";
 import { classifyBashCommand } from "./bash-parser.js";
 
 function findClassification(
@@ -66,29 +73,30 @@ function categoryToDecision(category: ActionCategory, autoApproveReadOps: boolea
 	}
 }
 
-/** Gmail send/draft-send method patterns */
-const GMAIL_SEND_PATTERNS = /\b(send|drafts\.send)\b/;
-
-/** Calendar create/insert method patterns */
-const CALENDAR_CREATE_PATTERNS = /\b(insert|create)\b/;
-
-function classifyGwsTool(parameters: Record<string, unknown>): ActionCategory | null {
+function classifyGwsTool(parameters: Record<string, unknown>): ActionCategory {
 	const service = typeof parameters.service === "string" ? parameters.service : "";
 	const method = typeof parameters.method === "string" ? parameters.method : "";
 
-	if (service === "gmail" && GMAIL_SEND_PATTERNS.test(method)) {
-		return "write-irreversible";
-	}
-
+	// Tier 1: Irreversible (send, create-with-recipients)
+	if (service === "gmail" && GMAIL_SEND_PATTERNS.test(method)) return "write-irreversible";
 	if (service === "calendar" && CALENDAR_CREATE_PATTERNS.test(method)) {
-		// Only irreversible if attendees are present (sends invite)
 		const attendees = parameters.attendees;
 		if (Array.isArray(attendees) && attendees.length > 0) {
 			return "write-irreversible";
 		}
 	}
 
-	return null;
+	// Tier 2: Dangerous (delete, trash, remove)
+	if (GWS_DELETE_PATTERNS.test(method)) return "dangerous";
+
+	// Tier 3: Read (list, get, search, watch)
+	if (GWS_READ_PATTERNS.test(method)) return "read";
+
+	// Tier 4: Write (create, insert, update, patch, modify, copy)
+	if (GWS_WRITE_PATTERNS.test(method)) return "write";
+
+	// Fail-closed: unrecognized GWS methods default to write (requires confirmation)
+	return "write";
 }
 
 export function classify(manifest: ActionManifest, config: SentinelConfig): PolicyDecision {
@@ -102,9 +110,7 @@ export function classify(manifest: ActionManifest, config: SentinelConfig): Poli
 
 	if (tool === "gws") {
 		const gwsCategory = classifyGwsTool(parameters);
-		if (gwsCategory) {
-			return categoryToDecision(gwsCategory, config.autoApproveReadOps);
-		}
+		return categoryToDecision(gwsCategory, config.autoApproveReadOps);
 	}
 
 	const classification = findClassification(tool, config.classifications);

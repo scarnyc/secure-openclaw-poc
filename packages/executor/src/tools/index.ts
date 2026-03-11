@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { executeBash } from "./bash.js";
 import { executeEditFile } from "./edit-file.js";
+import { executeGws } from "./gws.js";
 import { executeReadFile } from "./read-file.js";
 import { ToolRegistry } from "./registry.js";
 import { executeWriteFile } from "./write-file.js";
@@ -27,6 +28,21 @@ const EditFileParamsSchema = z.object({
 	new_string: z.string(),
 });
 
+const GwsParamsSchema = z.object({
+	service: z
+		.string()
+		.min(1)
+		.max(64)
+		.regex(/^[a-z][a-zA-Z0-9_-]*$/, "Invalid service name"),
+	method: z
+		.string()
+		.min(1)
+		.max(256)
+		.regex(/^[a-zA-Z][a-zA-Z0-9_.]*$/, "Invalid method name"),
+	args: z.record(z.unknown()).optional(),
+	sanitize: z.boolean().optional(),
+});
+
 export function createToolRegistry(allowedRoots?: readonly string[]): ToolRegistry {
 	const registry = new ToolRegistry();
 
@@ -48,6 +64,11 @@ export function createToolRegistry(allowedRoots?: readonly string[]): ToolRegist
 	registry.registerBuiltin("edit_file", (params, manifestId) => {
 		const parsed = EditFileParamsSchema.parse(params);
 		return executeEditFile(parsed, manifestId, allowedRoots);
+	});
+
+	registry.registerBuiltin("gws", (params, manifestId) => {
+		const parsed = GwsParamsSchema.parse(params);
+		return executeGws(parsed, manifestId);
 	});
 
 	return registry;

@@ -10,6 +10,12 @@ const CREDENTIAL_PATTERNS: readonly RegExp[] = [
 	/sk-[A-Za-z0-9_-]{20,}/g,
 	// Gemini / Google API keys
 	/AIza[A-Za-z0-9_-]{35}/g,
+	// Google OAuth2 access tokens
+	/ya29\.[A-Za-z0-9_\-.]+/g,
+	// Google OAuth2 refresh tokens
+	/1\/\/[A-Za-z0-9_\-.]{60,}/g,
+	// Google OAuth2 authorization codes
+	/4\/[A-Za-z0-9_\-.]{40,}/g,
 	// GitHub personal access tokens
 	/ghp_[A-Za-z0-9]{36,}/g,
 	// GitHub OAuth tokens

@@ -82,13 +82,14 @@ describe("GET /tools", () => {
 		expect(res.status).toBe(200);
 		const tools = (await res.json()) as Array<{ name: string; source: string }>;
 		expect(Array.isArray(tools)).toBe(true);
-		expect(tools.length).toBe(4);
+		expect(tools.length).toBe(5);
 
 		const names = tools.map((t) => t.name);
 		expect(names).toContain("bash");
 		expect(names).toContain("read_file");
 		expect(names).toContain("write_file");
 		expect(names).toContain("edit_file");
+		expect(names).toContain("gws");
 
 		for (const tool of tools) {
 			expect(tool.source).toBe("builtin");

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-export const BUILTIN_TOOLS = ["bash", "read_file", "write_file", "edit_file"] as const;
+export const BUILTIN_TOOLS = ["bash", "read_file", "write_file", "edit_file", "gws"] as const;
 
 export const BuiltinToolNameSchema = z.enum(BUILTIN_TOOLS);
 export type BuiltinToolName = z.infer<typeof BuiltinToolNameSchema>;
