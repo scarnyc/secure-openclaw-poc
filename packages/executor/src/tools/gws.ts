@@ -1,7 +1,14 @@
-import { GWS_READ_PATTERNS, type GwsAgentScopes, type ToolResult } from "@sentinel/types";
+import {
+	GMAIL_SEND_PATTERNS,
+	GWS_READ_PATTERNS,
+	type GwsAgentScopes,
+	type ToolResult,
+} from "@sentinel/types";
 import { execa } from "execa";
-import { moderateEmail } from "../moderation/email-scanner.js";
+import { moderateEmail, scanOutboundEmail } from "../moderation/email-scanner.js";
+import { getModerationMode } from "../moderation/scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
+import { validateGwsSendArgs } from "./gws-validation.js";
 
 const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
 const STRIPPED_ENV_KEYS = new Set([
@@ -57,6 +64,39 @@ export async function executeGws(
 				error: `Agent not authorized for service: ${params.service}`,
 				duration_ms: Date.now() - start,
 			};
+		}
+	}
+
+	if (params.args) {
+		const validation = validateGwsSendArgs(params.service, params.method, params.args);
+		if (!validation.valid) {
+			return {
+				manifestId,
+				success: false,
+				error: `GWS parameter validation failed: ${validation.errors.join("; ")}`,
+				duration_ms: Date.now() - start,
+			};
+		}
+	}
+
+	// Outbound email scanning: check subject/body for injection patterns before send
+	if (params.args && params.service === "gmail" && GMAIL_SEND_PATTERNS.test(params.method)) {
+		GMAIL_SEND_PATTERNS.lastIndex = 0;
+		const mode = getModerationMode();
+		if (mode !== "off") {
+			const scanResult = scanOutboundEmail(params.args);
+			if (scanResult.flagged) {
+				if (mode === "enforce") {
+					return {
+						manifestId,
+						success: false,
+						error: `Outbound email blocked: ${scanResult.reason}`,
+						duration_ms: Date.now() - start,
+					};
+				}
+				// warn mode: log but proceed
+				console.warn(`[gws:outbound-scan] ${scanResult.reason}`);
+			}
 		}
 	}
 

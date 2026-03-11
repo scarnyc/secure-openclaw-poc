@@ -2,6 +2,27 @@ import type { CredentialVault } from "@sentinel/crypto";
 import type { Context } from "hono";
 import { checkSsrf, SsrfError } from "./ssrf-guard.js";
 
+const ALLOWED_RESPONSE_HEADERS = new Set([
+	"content-type",
+	"content-length",
+	"content-encoding",
+	"transfer-encoding",
+	"x-request-id",
+	"request-id",
+	"retry-after",
+	"x-ratelimit-limit",
+	"x-ratelimit-remaining",
+	"x-ratelimit-reset",
+	"openai-organization",
+	"openai-processing-ms",
+	"anthropic-ratelimit-requests-limit",
+	"anthropic-ratelimit-requests-remaining",
+	"anthropic-ratelimit-requests-reset",
+	"anthropic-ratelimit-tokens-limit",
+	"anthropic-ratelimit-tokens-remaining",
+	"anthropic-ratelimit-tokens-reset",
+]);
+
 const ALLOWED_LLM_HOSTS = new Set([
 	"api.anthropic.com",
 	"api.openai.com",
@@ -146,10 +167,17 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 				duplex: "half",
 			});
 
-			// Stream the response back to the agent
+			// Filter response headers — only forward allowlisted headers to agent
+			const responseHeaders = new Headers();
+			for (const [key, value] of upstreamResponse.headers.entries()) {
+				if (ALLOWED_RESPONSE_HEADERS.has(key.toLowerCase())) {
+					responseHeaders.set(key, value);
+				}
+			}
+
 			return new Response(upstreamResponse.body, {
 				status: upstreamResponse.status,
-				headers: upstreamResponse.headers,
+				headers: responseHeaders,
 			});
 		} catch (error) {
 			// Log details server-side but return generic message to untrusted agent

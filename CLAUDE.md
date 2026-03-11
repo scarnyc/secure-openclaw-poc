@@ -322,6 +322,9 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - [ ] Promptfoo for evals and red teaming (pen testing, adversarial attacks): https://github.com/promptfoo/promptfoo#readme
 - [ ] Posthog for app analytics: https://posthog.com/
 - [ ] Moltworkers CF deployment: (https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/) | (https://github.com/cloudflare/moltworker)
+- [ ] Paperclip: Open-source orchestration for zero-human companies | https://github.com/paperclipai/paperclip
+
+### References
 - See `docs/plans/path-a-v2-adopt-openfang-primitives.md` §Phase 2 for security gaps and agent roster.
 - See openclaw repo: https://github.com/openclaw/openclaw
 

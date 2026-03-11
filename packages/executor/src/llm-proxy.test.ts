@@ -198,6 +198,97 @@ describe("LLM Proxy", () => {
 		expect(headers.get("x-goog-api-key")).toBeNull();
 	});
 
+	describe("response header filtering", () => {
+		it("forwards safe headers (content-type, x-request-id)", async () => {
+			const mockResponse = new Response("{}", {
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+					"x-request-id": "req-abc123",
+				},
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("content-type")).toBe("application/json");
+			expect(res.headers.get("x-request-id")).toBe("req-abc123");
+		});
+
+		it("strips unsafe headers (set-cookie, authorization, x-custom-token)", async () => {
+			const mockResponse = new Response("{}", {
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+					"set-cookie": "session=secret",
+					authorization: "Bearer leaked-token",
+					"x-custom-token": "sensitive-data",
+				},
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("set-cookie")).toBeNull();
+			expect(res.headers.get("authorization")).toBeNull();
+			expect(res.headers.get("x-custom-token")).toBeNull();
+		});
+
+		it("preserves Anthropic rate-limit headers", async () => {
+			const mockResponse = new Response("{}", {
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+					"anthropic-ratelimit-requests-limit": "1000",
+					"anthropic-ratelimit-requests-remaining": "999",
+					"anthropic-ratelimit-tokens-limit": "100000",
+				},
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("anthropic-ratelimit-requests-limit")).toBe("1000");
+			expect(res.headers.get("anthropic-ratelimit-requests-remaining")).toBe("999");
+			expect(res.headers.get("anthropic-ratelimit-tokens-limit")).toBe("100000");
+		});
+
+		it("preserves OpenAI rate-limit headers", async () => {
+			const mockResponse = new Response("{}", {
+				status: 200,
+				headers: {
+					"content-type": "application/json",
+					"x-ratelimit-limit": "60",
+					"x-ratelimit-remaining": "59",
+					"openai-processing-ms": "150",
+				},
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("x-ratelimit-limit")).toBe("60");
+			expect(res.headers.get("x-ratelimit-remaining")).toBe("59");
+			expect(res.headers.get("openai-processing-ms")).toBe("150");
+		});
+	});
+
 	it("returns 502 on fetch error", async () => {
 		vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ECONNREFUSED"));
 

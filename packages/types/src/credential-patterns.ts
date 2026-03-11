@@ -38,6 +38,22 @@ const CREDENTIAL_PATTERNS: readonly RegExp[] = [
 ];
 
 const REDACTED = "[REDACTED]";
+const REDACTED_ENCODED = "[REDACTED_ENCODED]";
+
+/**
+ * Check if text contains any credential pattern.
+ * Returns true on first match, does not mutate.
+ */
+export function containsCredential(text: string): boolean {
+	for (const pattern of CREDENTIAL_PATTERNS) {
+		pattern.lastIndex = 0;
+		if (pattern.test(text)) {
+			pattern.lastIndex = 0;
+			return true;
+		}
+	}
+	return false;
+}
 
 /**
  * Redact all credential patterns from a string.
@@ -49,6 +65,53 @@ export function redactAllCredentials(text: string): string {
 		pattern.lastIndex = 0;
 		result = result.replace(pattern, REDACTED);
 	}
+	return result;
+}
+
+/** Regex matching base64 chunks of 20+ characters */
+const BASE64_CHUNK_RE = /[A-Za-z0-9+/=]{20,}/g;
+
+/** Regex detecting percent-encoded hex sequences */
+const PERCENT_ENCODED_RE = /%[0-9A-Fa-f]{2}/;
+
+/**
+ * Encoding-aware credential redaction.
+ *
+ * Three-pass approach:
+ *   1. Plaintext redaction via `redactAllCredentials()`
+ *   2. Base64 — find chunks ≥20 chars, decode, check for credentials
+ *   3. URL-encoding — if `%XX` sequences present, decode and check
+ */
+export function redactAllCredentialsWithEncoding(text: string): string {
+	// Pass 1: plaintext
+	let result = redactAllCredentials(text);
+
+	// Pass 2: base64 chunks
+	BASE64_CHUNK_RE.lastIndex = 0;
+	result = result.replace(BASE64_CHUNK_RE, (chunk) => {
+		try {
+			const decoded = Buffer.from(chunk, "base64").toString("utf-8");
+			if (containsCredential(decoded)) {
+				return REDACTED_ENCODED;
+			}
+		} catch {
+			// Invalid base64 — leave as-is
+		}
+		return chunk;
+	});
+
+	// Pass 3: URL-encoded segments
+	if (PERCENT_ENCODED_RE.test(result)) {
+		try {
+			const decoded = decodeURIComponent(result);
+			if (containsCredential(decoded)) {
+				result = redactAllCredentials(decoded);
+			}
+		} catch {
+			// Invalid percent-encoding — leave as-is
+		}
+	}
+
 	return result;
 }
 
@@ -97,5 +160,5 @@ export function redactPII(text: string): string {
  * Credentials first so tokens matching both get [REDACTED] rather than [PII_REDACTED].
  */
 export function redactAll(text: string): string {
-	return redactPII(redactAllCredentials(text));
+	return redactPII(redactAllCredentialsWithEncoding(text));
 }

@@ -82,6 +82,20 @@ From [Replit Security Checklist](https://docs.replit.com/tutorials/vibe-code-sec
 | [CWE-77](https://cwe.mitre.org/data/definitions/77.html) / [CWE-78](https://cwe.mitre.org/data/definitions/78.html) | Command injection hardening | Argument injection edge cases beyond bash parser |
 | [CF Workers Security Model](https://developers.cloudflare.com/workers/reference/security-model/) | Spectre mitigation, isolate architecture | V8 isolate boundaries, per-request key derivation |
 
+## Known Limitations
+
+### V8 String Immutability
+
+JavaScript strings are immutable in V8 — once created, their contents cannot be overwritten or zeroed. This means API keys and other secrets loaded into string variables persist in heap memory until garbage collected:
+
+- **Scope**: Any API key read from `process.env`, vault decryption output converted to string, or credential injected into HTTP headers exists as an immutable V8 string
+- **Mitigation**: `packages/crypto/src/vault.ts` uses `decryptToBuffer()` returning `Buffer` objects, which callers zero with `.fill(0)` in `finally` blocks. String conversion happens only at the last moment (e.g., setting HTTP headers in the LLM proxy)
+- **Irreducible gap**: The moment `buffer.toString()` is called to set a header value, a V8 string copy is created that cannot be zeroed. This is an inherent limitation of the JavaScript runtime
+- **Defense-in-depth**: Container isolation (Docker `internal: true` network) limits the blast radius — even if an attacker gains code execution inside the agent container, they cannot reach the executor's memory space where credentials reside. The executor runs in a separate container with its own V8 heap
+- **Recommendations**: (1) Use short-lived API keys where providers support rotation, (2) minimize string conversion lifetime by scoping to narrow blocks, (3) rely on container-level isolation as the primary boundary rather than in-process secret zeroing
+
+This limitation is documented as a conscious architectural trade-off. The two-process model (untrusted agent / trusted executor) ensures credentials are only present in the executor's V8 heap, which the agent cannot access.
+
 ## Sources
 
 ### Cloudflare
