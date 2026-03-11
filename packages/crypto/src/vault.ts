@@ -1,6 +1,6 @@
 import { readFile, writeFile } from "node:fs/promises";
 import type { EncryptedBlob } from "./encryption.js";
-import { DecryptionError, decrypt, encrypt } from "./encryption.js";
+import { DecryptionError, decrypt, decryptToBuffer, encrypt } from "./encryption.js";
 import { deriveKey, generateSalt } from "./key-derivation.js";
 
 const VERIFIER_PLAINTEXT = "sentinel-vault-v1";
@@ -92,6 +92,20 @@ export class CredentialVault {
 			entry.data.ciphertext,
 		);
 		return JSON.parse(plaintext);
+	}
+
+	/** Retrieve credential as raw Buffer. Caller MUST zero after use. */
+	retrieveBuffer(serviceId: string): Buffer {
+		const entry = this.data.entries[serviceId];
+		if (!entry) {
+			throw new Error(`No credential found for service: ${serviceId}`);
+		}
+		return decryptToBuffer(
+			this.derivedKey,
+			entry.data.iv,
+			entry.data.authTag,
+			entry.data.ciphertext,
+		);
 	}
 
 	async remove(serviceId: string): Promise<void> {

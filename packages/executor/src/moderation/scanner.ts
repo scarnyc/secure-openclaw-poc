@@ -51,8 +51,8 @@ export function scanContent(text: string): ScanResult {
 
 export function getModerationMode(): ModerationMode {
 	const mode = process.env.SENTINEL_MODERATION_MODE;
-	if (mode === "enforce" || mode === "warn") return mode;
-	return "off";
+	if (mode === "enforce" || mode === "off") return mode;
+	return "warn";
 }
 
 export interface ModerationResult {

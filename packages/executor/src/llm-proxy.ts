@@ -1,3 +1,4 @@
+import type { CredentialVault } from "@sentinel/crypto";
 import type { Context } from "hono";
 import { checkSsrf, SsrfError } from "./ssrf-guard.js";
 
@@ -9,7 +10,7 @@ const ALLOWED_LLM_HOSTS = new Set([
 
 /**
  * Map of LLM provider hostnames to their required API key env var names.
- * The proxy injects the appropriate key from executor env.
+ * The proxy injects the appropriate key from executor env or vault.
  */
 const HOST_AUTH_HEADERS: Record<string, { envVar: string; headerName: string; prefix?: string }> = {
 	"api.anthropic.com": {
@@ -28,100 +29,131 @@ const HOST_AUTH_HEADERS: Record<string, { envVar: string; headerName: string; pr
 };
 
 /**
- * LLM proxy handler. Forwards requests to allowlisted LLM API hosts,
- * injecting the appropriate API key from executor environment.
+ * Retrieve API key from vault as Buffer, extract the key string, then zero the Buffer.
+ * Returns undefined if vault doesn't have the key.
+ *
+ * Vault stores credentials as JSON: { key: "sk-..." }
+ * The Buffer is zeroed immediately after extracting the string value.
+ * The resulting string is a short-lived local — better than process.env lifetime.
+ */
+function getKeyFromVault(vault: CredentialVault, targetHost: string): string | undefined {
+	const serviceId = `llm/${targetHost}`;
+	try {
+		const buf = vault.retrieveBuffer(serviceId);
+		try {
+			const parsed: Record<string, string> = JSON.parse(buf.toString("utf8"));
+			return parsed.key;
+		} finally {
+			buf.fill(0);
+		}
+	} catch {
+		// Key not in vault — caller should fall back to env
+		return undefined;
+	}
+}
+
+/**
+ * Creates an LLM proxy handler. When vault is provided, attempts vault-based
+ * key retrieval first (Buffer is zeroed after use), falling back to process.env.
  *
  * Agent sends: POST /proxy/llm/<downstream-path> with an optional `x-llm-host`
  * header to select the provider (default: api.anthropic.com).
- *
- * This is designed to work with the Anthropic SDK's baseURL parameter.
- * When the agent sets `baseURL=http://executor:3141/proxy/llm`,
- * the SDK sends requests to `/proxy/llm/v1/messages` etc.
- * We extract the path and forward to the real Anthropic API.
  */
-// NOTE: API keys from process.env are V8 immutable strings — cannot be zeroed.
-// Vault-based Buffer keys (zeroable) deferred to Phase 1.
-export async function handleLlmProxy(c: Context): Promise<Response> {
-	// Extract the downstream path (everything after /proxy/llm)
-	const url = new URL(c.req.url);
-	const proxyPrefix = "/proxy/llm";
-	const downstreamPath = url.pathname.slice(proxyPrefix.length);
+export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => Promise<Response> {
+	return async (c: Context): Promise<Response> => {
+		// Extract the downstream path (everything after /proxy/llm)
+		const url = new URL(c.req.url);
+		const proxyPrefix = "/proxy/llm";
+		const downstreamPath = url.pathname.slice(proxyPrefix.length);
 
-	if (!downstreamPath || downstreamPath === "/") {
-		return c.json({ error: "Missing downstream path" }, 400);
-	}
-
-	// Determine target host from x-llm-host header (default: api.anthropic.com)
-	const targetHost = c.req.header("x-llm-host") ?? "api.anthropic.com";
-
-	if (!ALLOWED_LLM_HOSTS.has(targetHost)) {
-		return c.json({ error: `Blocked: ${targetHost} is not an allowed LLM host` }, 403);
-	}
-
-	const targetUrl = `https://${targetHost}${downstreamPath}`;
-
-	// Build forwarded headers (strip hop-by-hop, add auth)
-	const forwardHeaders = new Headers();
-	for (const [key, value] of c.req.raw.headers.entries()) {
-		const lower = key.toLowerCase();
-		// Skip hop-by-hop and proxy-specific headers
-		if (
-			lower === "host" ||
-			lower === "connection" ||
-			lower === "x-llm-host" ||
-			lower === "content-length" ||
-			lower === "authorization" ||
-			lower === "x-api-key" ||
-			lower === "x-goog-api-key"
-		) {
-			continue;
+		if (!downstreamPath || downstreamPath === "/") {
+			return c.json({ error: "Missing downstream path" }, 400);
 		}
-		forwardHeaders.set(key, value);
-	}
 
-	// Inject API key from executor env
-	const authConfig = HOST_AUTH_HEADERS[targetHost];
-	if (authConfig) {
-		const apiKey = process.env[authConfig.envVar];
-		if (!apiKey) {
-			return c.json({ error: "LLM proxy configuration error" }, 500);
+		// Determine target host from x-llm-host header (default: api.anthropic.com)
+		const targetHost = c.req.header("x-llm-host") ?? "api.anthropic.com";
+
+		if (!ALLOWED_LLM_HOSTS.has(targetHost)) {
+			return c.json({ error: `Blocked: ${targetHost} is not an allowed LLM host` }, 403);
 		}
-		const value = authConfig.prefix ? `${authConfig.prefix}${apiKey}` : apiKey;
-		forwardHeaders.set(authConfig.headerName, value);
-	}
 
-	// SENTINEL: SSRF guard — verify target URL doesn't resolve to private IPs (Phase 1)
-	try {
-		await checkSsrf(targetUrl);
-	} catch (error) {
-		if (error instanceof SsrfError) {
-			return c.json({ error: "Blocked: SSRF protection" }, 403);
+		const targetUrl = `https://${targetHost}${downstreamPath}`;
+
+		// Build forwarded headers (strip hop-by-hop, add auth)
+		const forwardHeaders = new Headers();
+		for (const [key, value] of c.req.raw.headers.entries()) {
+			const lower = key.toLowerCase();
+			// Skip hop-by-hop and proxy-specific headers
+			if (
+				lower === "host" ||
+				lower === "connection" ||
+				lower === "x-llm-host" ||
+				lower === "content-length" ||
+				lower === "authorization" ||
+				lower === "x-api-key" ||
+				lower === "x-goog-api-key"
+			) {
+				continue;
+			}
+			forwardHeaders.set(key, value);
 		}
-		console.error(
-			`[llm-proxy] SSRF check failed unexpectedly: ${error instanceof Error ? error.message : "Unknown"}`,
-		);
-		return c.json({ error: "SSRF check failed" }, 500);
-	}
 
-	try {
-		const upstreamResponse = await fetch(targetUrl, {
-			method: c.req.method,
-			headers: forwardHeaders,
-			body: c.req.method !== "GET" ? c.req.raw.body : undefined,
-			duplex: "half",
-		});
+		// SENTINEL: Inject API key — prefer vault Buffer over process.env
+		// Vault keys are zeroed after extraction; env vars persist for process lifetime
+		const authConfig = HOST_AUTH_HEADERS[targetHost];
+		if (authConfig) {
+			let apiKey: string | undefined;
 
-		// Stream the response back to the agent
-		return new Response(upstreamResponse.body, {
-			status: upstreamResponse.status,
-			headers: upstreamResponse.headers,
-		});
-	} catch (error) {
-		// Log details server-side but return generic message to untrusted agent
-		// to avoid leaking internal network topology (IPs, DNS, ports)
-		console.error(
-			`[llm-proxy] Upstream request failed: ${error instanceof Error ? error.message : "Unknown"}`,
-		);
-		return c.json({ error: "LLM proxy upstream error" }, 502);
-	}
+			if (vault) {
+				apiKey = getKeyFromVault(vault, targetHost);
+			}
+			if (!apiKey) {
+				apiKey = process.env[authConfig.envVar];
+			}
+
+			if (!apiKey) {
+				return c.json({ error: "LLM proxy configuration error" }, 500);
+			}
+			const value = authConfig.prefix ? `${authConfig.prefix}${apiKey}` : apiKey;
+			forwardHeaders.set(authConfig.headerName, value);
+		}
+
+		// SENTINEL: SSRF guard — verify target URL doesn't resolve to private IPs (Phase 1)
+		try {
+			await checkSsrf(targetUrl);
+		} catch (error) {
+			if (error instanceof SsrfError) {
+				return c.json({ error: "Blocked: SSRF protection" }, 403);
+			}
+			console.error(
+				`[llm-proxy] SSRF check failed unexpectedly: ${error instanceof Error ? error.message : "Unknown"}`,
+			);
+			return c.json({ error: "SSRF check failed" }, 500);
+		}
+
+		try {
+			const upstreamResponse = await fetch(targetUrl, {
+				method: c.req.method,
+				headers: forwardHeaders,
+				body: c.req.method !== "GET" ? c.req.raw.body : undefined,
+				duplex: "half",
+			});
+
+			// Stream the response back to the agent
+			return new Response(upstreamResponse.body, {
+				status: upstreamResponse.status,
+				headers: upstreamResponse.headers,
+			});
+		} catch (error) {
+			// Log details server-side but return generic message to untrusted agent
+			// to avoid leaking internal network topology (IPs, DNS, ports)
+			console.error(
+				`[llm-proxy] Upstream request failed: ${error instanceof Error ? error.message : "Unknown"}`,
+			);
+			return c.json({ error: "LLM proxy upstream error" }, 502);
+		}
+	};
 }
+
+/** Backward-compatible handler using env vars only (no vault). */
+export const handleLlmProxy = createLlmProxyHandler();

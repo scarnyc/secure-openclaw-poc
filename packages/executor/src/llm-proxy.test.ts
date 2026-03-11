@@ -1,6 +1,21 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { CredentialVault } from "@sentinel/crypto";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { handleLlmProxy } from "./llm-proxy.js";
+import { createLlmProxyHandler, handleLlmProxy } from "./llm-proxy.js";
+
+// Mock SSRF guard — real DNS resolution is unreliable in tests
+vi.mock("./ssrf-guard.js", () => ({
+	checkSsrf: vi.fn().mockResolvedValue(undefined),
+	SsrfError: class SsrfError extends Error {
+		constructor(message?: string) {
+			super(message ?? "SSRF blocked");
+			this.name = "SsrfError";
+		}
+	},
+}));
 
 let app: Hono;
 
@@ -195,5 +210,105 @@ describe("LLM Proxy", () => {
 		expect(res.status).toBe(502);
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toBe("LLM proxy upstream error");
+	});
+});
+
+describe("LLM Proxy with vault-based key retrieval", () => {
+	const tempDirs: string[] = [];
+
+	async function makeTempVaultPath(): Promise<string> {
+		const dir = await mkdtemp(join(tmpdir(), "sentinel-llm-proxy-"));
+		tempDirs.push(dir);
+		return join(dir, "vault.json");
+	}
+
+	afterEach(async () => {
+		vi.restoreAllMocks();
+		delete process.env.ANTHROPIC_API_KEY;
+		delete process.env.OPENAI_API_KEY;
+		for (const dir of tempDirs) {
+			await rm(dir, { recursive: true, force: true });
+		}
+		tempDirs.length = 0;
+	});
+
+	it("uses vault key when vault is provided and key exists", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+		await vault.store("llm/api.anthropic.com", "api_key", {
+			key: "sk-ant-vault-key-123",
+		});
+
+		// No env var set — vault is the only source
+		delete process.env.ANTHROPIC_API_KEY;
+
+		const vaultApp = new Hono();
+		vaultApp.all("/proxy/llm/*", createLlmProxyHandler(vault));
+
+		const mockResponse = new Response(JSON.stringify({ id: "msg_456" }), {
+			status: 200,
+			headers: { "Content-Type": "application/json" },
+		});
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+		const res = await vaultApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({ model: "claude-sonnet-4-20250514" }),
+		});
+
+		expect(res.status).toBe(200);
+		expect(fetchSpy).toHaveBeenCalledOnce();
+		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
+		expect(headers.get("x-api-key")).toBe("sk-ant-vault-key-123");
+
+		vault.destroy();
+	});
+
+	it("falls back to env when vault is provided but key not stored", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+		// Vault exists but has no LLM keys
+
+		process.env.ANTHROPIC_API_KEY = "sk-ant-env-fallback";
+
+		const vaultApp = new Hono();
+		vaultApp.all("/proxy/llm/*", createLlmProxyHandler(vault));
+
+		const mockResponse = new Response("{}", { status: 200 });
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+		const res = await vaultApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(200);
+		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
+		expect(headers.get("x-api-key")).toBe("sk-ant-env-fallback");
+
+		vault.destroy();
+	});
+
+	it("handleLlmProxy backward compat still uses env vars", async () => {
+		// handleLlmProxy (no vault) should still work with env
+		process.env.ANTHROPIC_API_KEY = "sk-ant-compat-key";
+
+		const legacyApp = new Hono();
+		legacyApp.all("/proxy/llm/*", handleLlmProxy);
+
+		const mockResponse = new Response("{}", { status: 200 });
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+		const res = await legacyApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(200);
+		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
+		expect(headers.get("x-api-key")).toBe("sk-ant-compat-key");
 	});
 });

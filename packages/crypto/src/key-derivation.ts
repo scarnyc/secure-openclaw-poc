@@ -9,7 +9,7 @@ export function generateSalt(): Buffer {
 	return randomBytes(SALT_LENGTH);
 }
 
-export function deriveKey(password: string, salt: Buffer): Promise<Buffer> {
+export function deriveKey(password: string | Buffer, salt: Buffer): Promise<Buffer> {
 	return new Promise((resolve, reject) => {
 		pbkdf2(password, salt, ITERATIONS, KEY_LENGTH, DIGEST, (err, key) => {
 			if (err) reject(err);

@@ -12,6 +12,16 @@ services:
       - ./data:/app/data:rw
     environment:
       - SENTINEL_DOCKER=true
+    # SENTINEL: Container hardening — defense-in-depth against RCE (G5)
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
     networks:
       # Executor joins both networks: internal for agent comms, external for LLM APIs
       - sentinel-internal
@@ -30,6 +40,14 @@ services:
       - EXECUTOR_URL=http://executor:3141
       # Route LLM calls through executor proxy — agent never holds API keys
       - ANTHROPIC_BASE_URL=http://executor:3141/proxy/llm
+    # SENTINEL: Container hardening — agent is fully restricted (G5)
+    read_only: true
+    tmpfs:
+      - /tmp:noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     networks:
       # Agent only on internal network — no direct internet access
       - sentinel-internal

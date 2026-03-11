@@ -191,7 +191,7 @@ describe("GWS pipeline integration", () => {
 		const entries = auditLogger.getRecent(100);
 		const match = entries.find((e) => e.manifestId === manifest.id);
 		expect(match, "audit entry for gws call").toBeDefined();
-		expect(match!.tool).toBe("gws");
+		expect(match?.tool).toBe("gws");
 	});
 
 	it("gws gmail.send classified as write-irreversible routes to confirmation", async () => {
@@ -272,7 +272,7 @@ describe("GWS pipeline integration", () => {
 
 		const entries = auditLogger.getRecent(100);
 		const match = entries.find((e) => e.manifestId === manifest.id);
-		expect(match!.category).toBe("dangerous");
+		expect(match?.category).toBe("dangerous");
 	});
 
 	it("gws errors return structured error (not raw stderr)", async () => {

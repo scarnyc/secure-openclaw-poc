@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, type MockInstance, vi } from "vitest";
-import { executeGws, type GwsParams } from "./gws.js";
+import { executeGws, type GwsAgentScopes, type GwsParams } from "./gws.js";
 
 // Mock execa
 vi.mock("execa", () => ({
@@ -82,7 +82,7 @@ describe("executeGws", () => {
 		});
 		const result = await executeGws(makeParams(), "test-id");
 		expect(result.success).toBe(true);
-		expect(result.output!.length).toBeLessThan(largeOutput.length);
+		expect(result.output?.length).toBeLessThan(largeOutput.length);
 		expect(result.output).toContain("[OUTPUT TRUNCATED");
 	});
 
@@ -191,6 +191,93 @@ describe("executeGws", () => {
 			);
 			expect(result.success).toBe(true);
 			expect(result.output).not.toBe("[SUSPICIOUS_CONTENT_REMOVED]");
+		});
+	});
+
+	describe("per-agent scope restriction (G4)", () => {
+		it("blocks agent when service is in denyServices", async () => {
+			const scopes: GwsAgentScopes = {
+				"agent-research": {
+					denyServices: ["gmail"],
+				},
+			};
+			const result = await executeGws(
+				makeParams({ service: "gmail" }),
+				"test-id",
+				"agent-research",
+				scopes,
+			);
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("not authorized for service");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("blocks agent when service not in allowedServices", async () => {
+			const scopes: GwsAgentScopes = {
+				"agent-calendar": {
+					allowedServices: ["calendar"],
+				},
+			};
+			const result = await executeGws(
+				makeParams({ service: "gmail" }),
+				"test-id",
+				"agent-calendar",
+				scopes,
+			);
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("not authorized for service");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("allows agent when service is in allowedServices", async () => {
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+			const scopes: GwsAgentScopes = {
+				"agent-calendar": {
+					allowedServices: ["calendar", "gmail"],
+				},
+			};
+			const result = await executeGws(
+				makeParams({ service: "gmail" }),
+				"test-id",
+				"agent-calendar",
+				scopes,
+			);
+			expect(result.success).toBe(true);
+			expect(mockExeca).toHaveBeenCalled();
+		});
+
+		it("allows agent when no scopes defined for that agentId", async () => {
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+			const scopes: GwsAgentScopes = {
+				"other-agent": {
+					denyServices: ["gmail"],
+				},
+			};
+			const result = await executeGws(
+				makeParams({ service: "gmail" }),
+				"test-id",
+				"agent-research",
+				scopes,
+			);
+			expect(result.success).toBe(true);
+			expect(mockExeca).toHaveBeenCalled();
+		});
+
+		it("allows execution when no agentId provided (backward compat)", async () => {
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+			const scopes: GwsAgentScopes = {
+				"agent-research": {
+					denyServices: ["gmail"],
+				},
+			};
+			const result = await executeGws(
+				makeParams({ service: "gmail" }),
+				"test-id",
+				undefined,
+				scopes,
+			);
+			expect(result.success).toBe(true);
+			expect(mockExeca).toHaveBeenCalled();
 		});
 	});
 });

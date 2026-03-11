@@ -17,7 +17,8 @@ RUN mkdir -p /app/data && chown node:node /app/data
 USER node
 EXPOSE 3141
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "packages/executor/dist/entrypoint.js"]
+# SENTINEL: --secure-heap mlock()s OpenSSL key material, preventing swap to disk
+CMD ["node", "--secure-heap=65536", "--secure-heap-min=64", "packages/executor/dist/entrypoint.js"]
 
 # Agent stage
 FROM node:22-alpine AS agent

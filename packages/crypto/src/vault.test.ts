@@ -122,6 +122,38 @@ describe("CredentialVault", () => {
 		vault.destroy();
 	});
 
+	it("retrieveBuffer() returns Buffer that can be zeroed", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+
+		await vault.store("openai", "api_key", { key: "sk-secret-key-123" });
+
+		const buf = vault.retrieveBuffer("openai");
+		expect(Buffer.isBuffer(buf)).toBe(true);
+		expect(buf.length).toBeGreaterThan(0);
+
+		// Verify it contains the stored data
+		const parsed = JSON.parse(buf.toString("utf8"));
+		expect(parsed.key).toBe("sk-secret-key-123");
+
+		// Zero the buffer — it should be all zeros after
+		buf.fill(0);
+		expect(buf.every((b: number) => b === 0)).toBe(true);
+
+		vault.destroy();
+	});
+
+	it("retrieveBuffer() throws for missing service", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+
+		expect(() => vault.retrieveBuffer("nonexistent")).toThrow(
+			"No credential found for service: nonexistent",
+		);
+
+		vault.destroy();
+	});
+
 	it("open() restores vault and retrieves stored credentials", async () => {
 		const vaultPath = await makeTempVaultPath();
 		const vault1 = await CredentialVault.create(vaultPath, "persist-pass");

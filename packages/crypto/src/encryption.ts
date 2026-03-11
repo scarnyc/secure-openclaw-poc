@@ -36,6 +36,33 @@ export function encrypt(key: Buffer, plaintext: string): EncryptedBlob {
 	}
 }
 
+/**
+ * Decrypt and return raw Buffer. Caller MUST zero the returned Buffer after use.
+ * Unlike decrypt(), this avoids creating an intermediate V8 string that cannot be zeroed.
+ */
+export function decryptToBuffer(
+	key: Buffer,
+	iv: string,
+	authTag: string,
+	ciphertext: string,
+): Buffer {
+	const ivBuf = Buffer.from(iv, "base64");
+	const authTagBuf = Buffer.from(authTag, "base64");
+	const ciphertextBuf = Buffer.from(ciphertext, "base64");
+	try {
+		const decipher = createDecipheriv(ALGORITHM, key, ivBuf);
+		decipher.setAuthTag(authTagBuf);
+		return Buffer.concat([decipher.update(ciphertextBuf), decipher.final()]);
+	} catch (err) {
+		if (err instanceof DecryptionError) throw err;
+		throw new DecryptionError();
+	} finally {
+		ivBuf.fill(0);
+		authTagBuf.fill(0);
+		ciphertextBuf.fill(0);
+	}
+}
+
 export function decrypt(key: Buffer, iv: string, authTag: string, ciphertext: string): string {
 	const ivBuf = Buffer.from(iv, "base64");
 	const authTagBuf = Buffer.from(authTag, "base64");

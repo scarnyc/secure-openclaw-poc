@@ -11,7 +11,7 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 
 **Wave Progress**
 - [x] Wave 2.1: Security Primitives — Ed25519 signing + irreversible classification (553 tests)
-- [ ] Wave 2.2: Google Workspace CLI + Email Defense
+- [x] Wave 2.2: Google Workspace CLI + Email Defense (583 tests)
 - [ ] Wave 2.3: OpenClaw + Sentinel Plugin
 - [ ] Wave 2.4: LLM Infrastructure (Plano routing, prompt caching, Promptfoo)
 
@@ -187,6 +187,7 @@ These 12 rules are **non-negotiable**. Every PR must maintain them. Each has a r
 - **Single source of truth** in `packages/types/src/credential-patterns.ts`
 - Both `executor/credential-filter.ts` and `audit/redact.ts` import from types
 - Add new patterns here only — never maintain separate pattern lists
+- **Buffer-based APIs** — `decryptToBuffer()` and `vault.retrieveBuffer()` return `Buffer` for zeroization; callers MUST `.fill(0)` in `finally`. Prefer over string-returning `decrypt()`/`retrieve()`.
 
 ### Action Categories
 Four categories with graduated confirmation: `read` (auto-approve configurable), `write` (confirm), `write-irreversible` (always confirm + "cannot be undone" TUI warning), `dangerous` (always confirm). `write-irreversible` targets email send, calendar invites with attendees, financial transactions. Classifier in `packages/policy/src/classifier.ts`.
@@ -203,7 +204,13 @@ Four categories with graduated confirmation: `read` (auto-approve configurable),
 - firejail is Linux-only; local Mac dev falls back to unsandboxed execution
 
 ### Content Moderation
-- **Mode**: `SENTINEL_MODERATION_MODE=enforce|warn|off` (default: off in local dev)
+- **Mode**: `SENTINEL_MODERATION_MODE=enforce|warn|off` (default: warn)
+
+### GWS Per-Agent Scoping
+- `GwsAgentScopes` in `packages/executor/src/tools/gws.ts` — restricts GWS service access per-agent
+- `denyServices` checked before `allowedServices` (deny-first, fail-fast)
+- No agentId = unrestricted (backward compatible)
+- Security audit doc: `docs/security/gws-cli-audit.md`
 - Scanner in `packages/executor/src/moderation/scanner.ts`
 - Pre-execute: scans request parameters; post-execute: scans tool output
 - `enforce`: blocked content returns generic error; `warn`: logged but not blocked
@@ -299,6 +306,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 | Memory Store | 542 | #9 | `@sentinel/memory`: SQLite + FTS5 + sqlite-vec, hybrid search, embeddings, consolidation |
 | Rampart Integration | — | — | Host-level Rampart firewall v0.8.3, 45 standard + 3 Sentinel project policies, PreToolUse hooks |
 | Wave 2.1: Security Primitives | 553 | — | Ed25519 manifest signing, `write-irreversible` category, irreversible TUI warning |
+| Wave 2.2: GWS CLI + Email Defense | 583 | — | GWS tool integration, email injection scanner, per-agent scoping, credential zeroization (G1-G8), Docker hardening |
 
 ### Backlog
 
