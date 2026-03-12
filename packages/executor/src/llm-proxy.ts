@@ -1,6 +1,7 @@
 import { type CredentialVault, useCredential } from "@sentinel/crypto";
 import { redactAllCredentialsWithEncoding } from "@sentinel/types";
 import type { Context } from "hono";
+import { createSseCredentialFilter } from "./sse-credential-filter.js";
 import { checkSsrf, SsrfError } from "./ssrf-guard.js";
 
 const ALLOWED_RESPONSE_HEADERS = new Set([
@@ -168,15 +169,22 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 			}
 
 			// SENTINEL: Streaming vs non-streaming response handling.
-			// SSE (text/event-stream) responses must pass through unmodified to preserve
-			// token-by-token delivery. Credential filtering for streaming is handled by the
-			// tool-output filter on each tool result. Non-streaming responses are fully
-			// materialized and filtered before reaching the agent.
+			// SSE streams are piped through createSseCredentialFilter() which redacts
+			// credential patterns from data: lines while preserving event boundaries.
+			// This is defense-in-depth — the tool-output filter also catches credentials
+			// after the agent processes each tool result.
 			const contentType = upstreamResponse.headers.get("content-type") ?? "";
 			const isStreaming = contentType.includes("text/event-stream");
 
 			if (isStreaming) {
-				return new Response(upstreamResponse.body, {
+				// Remove content-length — streaming through TransformStream changes body size
+				responseHeaders.delete("content-length");
+
+				const filteredStream = upstreamResponse.body
+					? upstreamResponse.body.pipeThrough(createSseCredentialFilter())
+					: null;
+
+				return new Response(filteredStream, {
 					status: upstreamResponse.status,
 					headers: responseHeaders,
 				});

@@ -394,7 +394,7 @@ describe("LLM Proxy", () => {
 			expect(text).toBe(cleanBody);
 		});
 
-		it("passes through SSE streaming responses without materializing body", async () => {
+		it("passes clean SSE streaming responses through unchanged", async () => {
 			const sseChunks = 'data: {"type":"content_block_delta"}\n\ndata: {"type":"message_stop"}\n\n';
 			const mockResponse = new Response(sseChunks, {
 				status: 200,
@@ -411,6 +411,33 @@ describe("LLM Proxy", () => {
 			expect(res.headers.get("content-type")).toBe("text/event-stream");
 			const text = await res.text();
 			expect(text).toBe(sseChunks);
+		});
+
+		it("redacts credentials in SSE streaming responses", async () => {
+			const sseWithCred =
+				'data: {"type":"content_block_delta","delta":{"text":"Hello"}}\n\n' +
+				'data: {"error":"Invalid key: sk-ant-abc123-leaked-key"}\n\n' +
+				'data: {"type":"message_stop"}\n\n';
+			const mockResponse = new Response(sseWithCred, {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("content-type")).toBe("text/event-stream");
+			const text = await res.text();
+			// Clean events pass through
+			expect(text).toContain("Hello");
+			expect(text).toContain("message_stop");
+			// Credential redacted
+			expect(text).not.toContain("sk-ant-abc123");
+			expect(text).toContain("[REDACTED]");
 		});
 
 		it("removes stale content-length after body filtering", async () => {
