@@ -201,6 +201,7 @@ Four categories with graduated confirmation: `read` (auto-approve configurable),
 - Signature stored in audit entry, excluded from Merkle hash (signs the hash — circular dependency otherwise)
 - `verifyChain(publicKey?)` validates both hash chain AND signatures when public key provided
 - Backward compatible: unsigned entries pass verification (unless `strictSignatures: true`)
+- Private key stored as `audit-signing.key` (0o600) alongside audit DB — never inside SQLite (co-location nullifies tamper-evidence)
 
 ### Bash Sandboxing
 - **Interpreter inline-exec** (`python3 -c`, `node -e`, etc.) classified as "dangerous" — always requires confirmation
@@ -299,6 +300,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **Rampart `**` glob quirk** — `**/path` requires ≥1 path segment; always include bare `path` variant alongside `**/path`
 - **Google OAuth tokens in OS Keyring** — GWS CLI stores tokens in macOS Keychain, NOT Sentinel vault; Docker deployment recommended for production (agent can't reach host keyring); local dev should use test/sandbox Google account. See `docs/security/gws-cli-audit.md`
 - **Entrypoint ordering** — `entrypoint.ts` must open vault BEFORE `createToolRegistry()` — registry captures vault via closure for GWS token injection
+- **Hono test client Content-Length** — Hono's test client doesn't always set Content-Length; body size middleware requiring it must be gated behind `SENTINEL_DOCKER=true`
 - **AuditLogger auto-key-gen** — constructor calls `loadOrGenerateSigningKey()`, so ALL entries are signed; tests must use `logger.getSigningPublicKey()` not random keys for verification
 - **Parallel wave contamination** — when multiple waves touch the same file, restore from main first (`git checkout <main-sha> -- <file>`) then apply only the current wave's fix
 
@@ -317,7 +319,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 | Wave 2.2: GWS CLI + Email Defense | 583 | — | GWS tool integration, email injection scanner, per-agent scoping, credential zeroization (G1-G8), Docker hardening |
 | GWS Credential Audit | 594 | — | Closed 5 audit gaps: LLM proxy body filtering, PEM key detection, exfiltration patterns, outbound email credential gate, OS Keyring docs |
 | Wave 2.2b: Credential Zeroization | 652 | #16 | `useCredential()` helper, V8 string lifetime minimization, LLM proxy refactor, GWS vault migration, API deprecation |
-| Wave 2.2c: Pen Test Fixes | 845 | #17 | 16 findings (2 HIGH, 9 MEDIUM, 5 LOW): edit-file TOCTOU, Docker auth, SSRF IPs, bash deny-list, Map bounds, manifest validation, JWT+Stripe patterns, regex caps, confirmation timeout, strict signatures, memory quota, GWS finally, deny-list .enc |
+| Wave 2.2c: Pen Test Fixes | 847 | #17 | 16 pen test findings + 16 PR review fixes (3 critical, 8 important, 5 additional): fail-safe limits, HMAC wiring, TOCTOU inode, Ed25519 key separation, body size limits, Rust N-API scaffold |
 
 ### Backlog
 
