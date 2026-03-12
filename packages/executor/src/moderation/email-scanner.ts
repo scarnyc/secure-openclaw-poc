@@ -153,6 +153,41 @@ export function scanEmailContent(text: string): EmailScanResult {
 }
 
 /**
+ * Scan outbound email args (subject, body) for injection patterns.
+ * Reuses the same detection patterns as inbound scanning.
+ */
+export function scanOutboundEmail(args: Record<string, unknown>): EmailScanResult {
+	const allPatterns: string[] = [];
+	let maxSeverity: "low" | "medium" | "high" = "low";
+	const severityOrder = { low: 0, medium: 1, high: 2 };
+
+	const fieldsToScan = ["subject", "body"];
+	for (const field of fieldsToScan) {
+		const value = args[field];
+		if (typeof value !== "string") continue;
+		const result = scanEmailContent(value);
+		if (result.flagged) {
+			for (const p of result.patterns) {
+				if (!allPatterns.includes(p)) allPatterns.push(p);
+			}
+			if (severityOrder[result.severity] > severityOrder[maxSeverity]) {
+				maxSeverity = result.severity;
+			}
+		}
+	}
+
+	return {
+		flagged: allPatterns.length > 0,
+		patterns: allPatterns,
+		severity: maxSeverity,
+		reason:
+			allPatterns.length > 0
+				? `Outbound email injection detected: ${allPatterns.join(", ")}`
+				: undefined,
+	};
+}
+
+/**
  * Moderate email content using SENTINEL_MODERATION_MODE.
  * - enforce: replace flagged content with [SUSPICIOUS_CONTENT_REMOVED]
  * - warn: log but pass through

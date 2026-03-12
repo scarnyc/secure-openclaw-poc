@@ -1,6 +1,28 @@
 import type { CredentialVault } from "@sentinel/crypto";
+import { redactAllCredentialsWithEncoding } from "@sentinel/types";
 import type { Context } from "hono";
 import { checkSsrf, SsrfError } from "./ssrf-guard.js";
+
+const ALLOWED_RESPONSE_HEADERS = new Set([
+	"content-type",
+	"content-length",
+	"content-encoding",
+	"transfer-encoding",
+	"x-request-id",
+	"request-id",
+	"retry-after",
+	"x-ratelimit-limit",
+	"x-ratelimit-remaining",
+	"x-ratelimit-reset",
+	"openai-organization",
+	"openai-processing-ms",
+	"anthropic-ratelimit-requests-limit",
+	"anthropic-ratelimit-requests-remaining",
+	"anthropic-ratelimit-requests-reset",
+	"anthropic-ratelimit-tokens-limit",
+	"anthropic-ratelimit-tokens-remaining",
+	"anthropic-ratelimit-tokens-reset",
+]);
 
 const ALLOWED_LLM_HOSTS = new Set([
 	"api.anthropic.com",
@@ -146,10 +168,41 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 				duplex: "half",
 			});
 
-			// Stream the response back to the agent
-			return new Response(upstreamResponse.body, {
+			// Filter response headers — only forward allowlisted headers to agent
+			const responseHeaders = new Headers();
+			for (const [key, value] of upstreamResponse.headers.entries()) {
+				if (ALLOWED_RESPONSE_HEADERS.has(key.toLowerCase())) {
+					responseHeaders.set(key, value);
+				}
+			}
+
+			// SENTINEL: Streaming vs non-streaming response handling.
+			// SSE (text/event-stream) responses must pass through unmodified to preserve
+			// token-by-token delivery. Credential filtering for streaming is handled by the
+			// tool-output filter on each tool result. Non-streaming responses are fully
+			// materialized and filtered before reaching the agent.
+			const contentType = upstreamResponse.headers.get("content-type") ?? "";
+			const isStreaming = contentType.includes("text/event-stream");
+
+			if (isStreaming) {
+				return new Response(upstreamResponse.body, {
+					status: upstreamResponse.status,
+					headers: responseHeaders,
+				});
+			}
+
+			// Non-streaming: filter credential patterns from response body.
+			// Prevents LLM API error messages from leaking credentials (e.g., "Invalid API key: sk-ant-...").
+			const rawBody = await upstreamResponse.text();
+			const filteredBody = redactAllCredentialsWithEncoding(rawBody);
+
+			// Remove stale content-length — body size may have changed after redaction.
+			// The Response constructor will compute the correct value.
+			responseHeaders.delete("content-length");
+
+			return new Response(filteredBody, {
 				status: upstreamResponse.status,
-				headers: upstreamResponse.headers,
+				headers: responseHeaders,
 			});
 		} catch (error) {
 			// Log details server-side but return generic message to untrusted agent

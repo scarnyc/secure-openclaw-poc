@@ -42,10 +42,56 @@ export function formatConfirmationPrompt(req: PendingConfirmation): string {
 
 	lines.push(chalk.bold("Parameters:"));
 
-	for (const [key, value] of Object.entries(req.parameters)) {
-		const display = typeof value === "string" ? value : JSON.stringify(value);
-		const truncated = display.length > 200 ? `${display.slice(0, 200)}...` : display;
-		lines.push(`  ${chalk.cyan(key)}: ${truncated}`);
+	// Special handling: GWS email recipient display
+	if (req.tool === "gws" && req.category === "write-irreversible") {
+		const args = req.parameters.args;
+		if (args && typeof args === "object" && !Array.isArray(args)) {
+			const gwsArgs = args as Record<string, unknown>;
+			const recipientKeys = ["to", "cc", "bcc"] as const;
+			let totalRecipients = 0;
+
+			// Display non-recipient parameters with standard truncation
+			for (const [key, value] of Object.entries(req.parameters)) {
+				if (key === "args") continue; // Handle args specially
+				const display = typeof value === "string" ? value : JSON.stringify(value);
+				const truncated = display.length > 200 ? `${display.slice(0, 200)}...` : display;
+				lines.push(`  ${chalk.cyan(key)}: ${truncated}`);
+			}
+
+			// Display args fields
+			for (const [key, value] of Object.entries(gwsArgs)) {
+				if (recipientKeys.includes(key as (typeof recipientKeys)[number]) && Array.isArray(value)) {
+					totalRecipients += value.length;
+					lines.push(`  ${chalk.cyan(key)}:`);
+					for (const recipient of value) {
+						lines.push(`    - ${String(recipient)}`);
+					}
+				} else {
+					// Non-recipient args fields use standard truncation
+					const display = typeof value === "string" ? value : JSON.stringify(value);
+					const truncated = display.length > 200 ? `${display.slice(0, 200)}...` : display;
+					lines.push(`  ${chalk.cyan(key)}: ${truncated}`);
+				}
+			}
+
+			if (totalRecipients > 5) {
+				lines.push(chalk.yellow.bold(`⚠  ${totalRecipients} recipients total`));
+			}
+		} else {
+			// Fallback: standard display for non-args gws calls
+			for (const [key, value] of Object.entries(req.parameters)) {
+				const display = typeof value === "string" ? value : JSON.stringify(value);
+				const truncated = display.length > 200 ? `${display.slice(0, 200)}...` : display;
+				lines.push(`  ${chalk.cyan(key)}: ${truncated}`);
+			}
+		}
+	} else {
+		// Standard parameter display for non-GWS tools
+		for (const [key, value] of Object.entries(req.parameters)) {
+			const display = typeof value === "string" ? value : JSON.stringify(value);
+			const truncated = display.length > 200 ? `${display.slice(0, 200)}...` : display;
+			lines.push(`  ${chalk.cyan(key)}: ${truncated}`);
+		}
 	}
 
 	lines.push(chalk.dim("─────────────────────────────────────"));

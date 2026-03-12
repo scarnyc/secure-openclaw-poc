@@ -71,6 +71,30 @@ and in the project's setup documentation. Do not auto-update without review.
 5. **Docker keyring isolation** — current setup correctly does NOT mount keyring
    into containers; maintain this boundary
 
+## OS Keyring Risk: Docker-Only Recommendation
+
+**Risk**: Google OAuth tokens stored in the OS Keyring (macOS Keychain) are accessible
+to any process running as the same user. Unlike Sentinel's encrypted vault (AES-256-GCM
+with 600,000 PBKDF2 iterations), OS Keyring credentials are protected only by user-level
+ACLs. On local dev (no Docker), any process the agent spawns inherits keyring access.
+
+**Docker mitigates this**: The agent container runs with `internal: true` networking and
+does NOT mount the host keyring. GWS CLI calls are executed by the executor (trusted
+process), which has keyring access but never exposes raw tokens to the agent. The agent
+container cannot reach the host keyring even if compromised.
+
+**Recommendations by deployment mode**:
+
+| Mode | Risk Level | Recommendation |
+|------|-----------|---------------|
+| Docker Compose (production) | LOW | Agent can't reach keyring; executor mediates all access |
+| Local dev (no Docker) | MEDIUM | Use a test/sandbox Google account, not production credentials |
+| Hybrid (executor in Docker, host agent) | HIGH | Not recommended — agent has direct keyring access |
+
+**For production use**: Always deploy with Docker Compose. The two-container model
+(executor + agent) is the security boundary. Running the agent on the bare host
+eliminates the network isolation that prevents credential exfiltration.
+
 ## Open Questions
 
 - [ ] What keyring library does the GWS CLI use internally? (keytar? native?)

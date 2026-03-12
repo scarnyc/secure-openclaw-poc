@@ -30,8 +30,10 @@ export {
 	ToolRegistryEntrySchema,
 } from "./config.js";
 export {
+	containsCredential,
 	redactAll,
 	redactAllCredentials,
+	redactAllCredentialsWithEncoding,
 	redactPII,
 } from "./credential-patterns.js";
 export {
