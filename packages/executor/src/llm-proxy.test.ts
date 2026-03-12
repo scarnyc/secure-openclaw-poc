@@ -84,11 +84,17 @@ describe("LLM Proxy", () => {
 	});
 
 	it("allows api.anthropic.com (default host)", async () => {
+		let capturedUrl: string | undefined;
+		let capturedApiKey: string | null = null;
 		const mockResponse = new Response(JSON.stringify({ id: "msg_123" }), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
 		});
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (url, init) => {
+			capturedUrl = url as string;
+			capturedApiKey = (init?.headers as Headers).get("x-api-key");
+			return mockResponse;
+		});
 
 		const res = await app.request("/proxy/llm/v1/messages", {
 			method: "POST",
@@ -98,19 +104,22 @@ describe("LLM Proxy", () => {
 
 		expect(res.status).toBe(200);
 		expect(fetchSpy).toHaveBeenCalledOnce();
-
-		const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
-		expect(calledUrl).toBe("https://api.anthropic.com/v1/messages");
-		const headers = calledInit?.headers as Headers;
-		expect(headers.get("x-api-key")).toBe("sk-ant-test-key");
+		expect(capturedUrl).toBe("https://api.anthropic.com/v1/messages");
+		expect(capturedApiKey).toBe("sk-ant-test-key");
 	});
 
 	it("allows api.openai.com with Bearer auth", async () => {
+		let capturedUrl: string | undefined;
+		let capturedAuth: string | null = null;
 		const mockResponse = new Response(JSON.stringify({ choices: [] }), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
 		});
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (url, init) => {
+			capturedUrl = url as string;
+			capturedAuth = (init?.headers as Headers).get("Authorization");
+			return mockResponse;
+		});
 
 		const res = await app.request("/proxy/llm/v1/chat/completions", {
 			method: "POST",
@@ -122,18 +131,22 @@ describe("LLM Proxy", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
-		expect(calledUrl).toBe("https://api.openai.com/v1/chat/completions");
-		const headers = calledInit?.headers as Headers;
-		expect(headers.get("Authorization")).toBe("Bearer sk-test-openai-key");
+		expect(capturedUrl).toBe("https://api.openai.com/v1/chat/completions");
+		expect(capturedAuth).toBe("Bearer sk-test-openai-key");
 	});
 
 	it("allows generativelanguage.googleapis.com with x-goog-api-key", async () => {
+		let capturedUrl: string | undefined;
+		let capturedGeminiKey: string | null = null;
 		const mockResponse = new Response(JSON.stringify({ candidates: [] }), {
 			status: 200,
 			headers: { "Content-Type": "application/json" },
 		});
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (url, init) => {
+			capturedUrl = url as string;
+			capturedGeminiKey = (init?.headers as Headers).get("x-goog-api-key");
+			return mockResponse;
+		});
 
 		const res = await app.request("/proxy/llm/v1/models/gemini-pro:generateContent", {
 			method: "POST",
@@ -145,12 +158,10 @@ describe("LLM Proxy", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const [calledUrl, calledInit] = fetchSpy.mock.calls[0];
-		expect(calledUrl).toBe(
+		expect(capturedUrl).toBe(
 			"https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent",
 		);
-		const headers = calledInit?.headers as Headers;
-		expect(headers.get("x-goog-api-key")).toBe("AIzaSyDtestkey123456789012345678901234");
+		expect(capturedGeminiKey).toBe("AIzaSyDtestkey123456789012345678901234");
 	});
 
 	it("strips hop-by-hop headers", async () => {
@@ -175,8 +186,17 @@ describe("LLM Proxy", () => {
 	});
 
 	it("strips agent-supplied auth headers before forwarding", async () => {
+		let capturedApiKey: string | null = null;
+		let capturedAuth: string | null = null;
+		let capturedGeminiKey: string | null = null;
 		const mockResponse = new Response("{}", { status: 200 });
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (_url, init) => {
+			const headers = init?.headers as Headers;
+			capturedApiKey = headers.get("x-api-key");
+			capturedAuth = headers.get("Authorization");
+			capturedGeminiKey = headers.get("x-goog-api-key");
+			return mockResponse;
+		});
 
 		await app.request("/proxy/llm/v1/messages", {
 			method: "POST",
@@ -190,12 +210,11 @@ describe("LLM Proxy", () => {
 		});
 
 		expect(fetchSpy).toHaveBeenCalledOnce();
-		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
 		// Executor injects its own Anthropic key, not the agent's values
-		expect(headers.get("x-api-key")).toBe("sk-ant-test-key");
+		expect(capturedApiKey).toBe("sk-ant-test-key");
 		// Agent-supplied auth headers must not survive
-		expect(headers.get("Authorization")).toBeNull();
-		expect(headers.get("x-goog-api-key")).toBeNull();
+		expect(capturedAuth).toBeNull();
+		expect(capturedGeminiKey).toBeNull();
 	});
 
 	it("returns 502 on fetch error", async () => {
@@ -279,8 +298,12 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		const vaultApp = new Hono();
 		vaultApp.all("/proxy/llm/*", createLlmProxyHandler(vault));
 
+		let capturedApiKey: string | null = null;
 		const mockResponse = new Response("{}", { status: 200 });
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (_url, init) => {
+			capturedApiKey = (init?.headers as Headers).get("x-api-key");
+			return mockResponse;
+		});
 
 		const res = await vaultApp.request("/proxy/llm/v1/messages", {
 			method: "POST",
@@ -289,8 +312,7 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
-		expect(headers.get("x-api-key")).toBe("sk-ant-env-fallback");
+		expect(capturedApiKey).toBe("sk-ant-env-fallback");
 
 		vault.destroy();
 	});
@@ -331,6 +353,91 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		vault.destroy();
 	});
 
+	it("returns 500 on vault corruption instead of falling through", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+
+		// Monkey-patch retrieveBuffer to return garbage (simulates vault corruption)
+		vault.retrieveBuffer = () => Buffer.from("not-valid-json");
+
+		delete process.env.ANTHROPIC_API_KEY;
+
+		const vaultApp = new Hono();
+		vaultApp.all("/proxy/llm/*", createLlmProxyHandler(vault));
+
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+		const fetchSpy = vi.spyOn(globalThis, "fetch");
+
+		const res = await vaultApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toBe("LLM proxy credential error");
+		// Must NOT make a fetch call (no duplicate request)
+		expect(fetchSpy).not.toHaveBeenCalled();
+		// Must log the error
+		expect(consoleSpy).toHaveBeenCalled();
+
+		vault.destroy();
+	});
+
+	it("auth header cleaned up in env-var fallback path after fetch", async () => {
+		// No vault — env var path only
+		process.env.ANTHROPIC_API_KEY = "sk-ant-env-cleanup-test";
+
+		const envApp = new Hono();
+		envApp.all("/proxy/llm/*", createLlmProxyHandler());
+
+		let capturedHeaders: Headers | undefined;
+		vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (_url, init) => {
+			capturedHeaders = init?.headers as Headers;
+			expect(capturedHeaders.get("x-api-key")).toBe("sk-ant-env-cleanup-test");
+			return new Response("{}", { status: 200 });
+		});
+
+		const res = await envApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(200);
+		// Auth header should be cleaned up after fetch (finally block)
+		expect(capturedHeaders).toBeDefined();
+		expect(capturedHeaders?.get("x-api-key")).toBeNull();
+	});
+
+	it("does not make duplicate fetch on upstream failure with vault", async () => {
+		const vaultPath = await makeTempVaultPath();
+		const vault = await CredentialVault.create(vaultPath, "test-pass");
+		await vault.store("llm/api.anthropic.com", "api_key", {
+			key: "sk-ant-vault-no-dup",
+		});
+
+		delete process.env.ANTHROPIC_API_KEY;
+
+		const vaultApp = new Hono();
+		vaultApp.all("/proxy/llm/*", createLlmProxyHandler(vault));
+
+		const fetchSpy = vi.spyOn(globalThis, "fetch").mockRejectedValueOnce(new Error("ECONNREFUSED"));
+
+		const res = await vaultApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(502);
+		// Must only call fetch once — no duplicate request
+		expect(fetchSpy).toHaveBeenCalledOnce();
+
+		vault.destroy();
+	});
+
 	it("createLlmProxyHandler without vault still uses env vars", async () => {
 		// No vault provided — should fall back to env vars
 		process.env.ANTHROPIC_API_KEY = "sk-ant-compat-key";
@@ -338,8 +445,12 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		const legacyApp = new Hono();
 		legacyApp.all("/proxy/llm/*", createLlmProxyHandler());
 
+		let capturedApiKey: string | null = null;
 		const mockResponse = new Response("{}", { status: 200 });
-		const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+		vi.spyOn(globalThis, "fetch").mockImplementationOnce(async (_url, init) => {
+			capturedApiKey = (init?.headers as Headers).get("x-api-key");
+			return mockResponse;
+		});
 
 		const res = await legacyApp.request("/proxy/llm/v1/messages", {
 			method: "POST",
@@ -348,7 +459,6 @@ describe("LLM Proxy with vault-based key retrieval", () => {
 		});
 
 		expect(res.status).toBe(200);
-		const headers = fetchSpy.mock.calls[0][1]?.headers as Headers;
-		expect(headers.get("x-api-key")).toBe("sk-ant-compat-key");
+		expect(capturedApiKey).toBe("sk-ant-compat-key");
 	});
 });

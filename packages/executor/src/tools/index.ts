@@ -45,11 +45,13 @@ const GwsParamsSchema = z.object({
 	sanitize: z.boolean().optional(),
 });
 
-export function createToolRegistry(
-	allowedRoots?: readonly string[],
-	gwsScopes?: GwsAgentScopes,
-	vault?: CredentialVault,
-): ToolRegistry {
+export interface ToolRegistryOptions {
+	allowedRoots?: readonly string[];
+	gwsScopes?: GwsAgentScopes;
+	vault?: CredentialVault;
+}
+
+export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
 	const registry = new ToolRegistry();
 
 	registry.registerBuiltin("bash", (params, manifestId) => {
@@ -59,23 +61,27 @@ export function createToolRegistry(
 
 	registry.registerBuiltin("read_file", (params, manifestId) => {
 		const parsed = ReadFileParamsSchema.parse(params);
-		return executeReadFile(parsed, manifestId, allowedRoots);
+		return executeReadFile(parsed, manifestId, options.allowedRoots);
 	});
 
 	registry.registerBuiltin("write_file", (params, manifestId) => {
 		const parsed = WriteFileParamsSchema.parse(params);
-		return executeWriteFile(parsed, manifestId, allowedRoots);
+		return executeWriteFile(parsed, manifestId, options.allowedRoots);
 	});
 
 	registry.registerBuiltin("edit_file", (params, manifestId) => {
 		const parsed = EditFileParamsSchema.parse(params);
-		return executeEditFile(parsed, manifestId, allowedRoots);
+		return executeEditFile(parsed, manifestId, options.allowedRoots);
 	});
 
 	// SENTINEL: G4 — per-agent GWS scope restriction via closure-captured scopes
 	registry.registerBuiltin("gws", (params, manifestId, agentId) => {
 		const parsed = GwsParamsSchema.parse(params);
-		return executeGws(parsed, manifestId, agentId, gwsScopes, vault);
+		return executeGws(parsed, manifestId, {
+			agentId,
+			scopes: options.gwsScopes,
+			vault: options.vault,
+		});
 	});
 
 	return registry;

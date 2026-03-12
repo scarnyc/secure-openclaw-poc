@@ -28,7 +28,6 @@ describe("useCredential", () => {
 		const vault = await makeVault();
 		let capturedBuf: Buffer | undefined;
 
-		// Access internal to capture the buffer that retrieveBuffer returns
 		const origRetrieve = vault.retrieveBuffer.bind(vault);
 		vault.retrieveBuffer = (serviceId: string) => {
 			const buf = origRetrieve(serviceId);
@@ -71,6 +70,30 @@ describe("useCredential", () => {
 		vault.destroy();
 	});
 
+	it("zeroes buffer when async callback rejects", async () => {
+		const vault = await makeVault();
+		let capturedBuf: Buffer | undefined;
+
+		const origRetrieve = vault.retrieveBuffer.bind(vault);
+		vault.retrieveBuffer = (serviceId: string) => {
+			const buf = origRetrieve(serviceId);
+			capturedBuf = buf;
+			return buf;
+		};
+
+		await expect(
+			useCredential(vault, "test-service", async () => {
+				await new Promise((resolve) => setTimeout(resolve, 5));
+				throw new Error("async-fail");
+			}),
+		).rejects.toThrow("async-fail");
+
+		expect(capturedBuf).toBeDefined();
+		expect(capturedBuf?.every((b) => b === 0)).toBe(true);
+
+		vault.destroy();
+	});
+
 	it("works with async callbacks", async () => {
 		const vault = await makeVault();
 
@@ -106,6 +129,50 @@ describe("useCredential", () => {
 			transformed: "SK-SECRET-123",
 			length: 13,
 		});
+
+		vault.destroy();
+	});
+
+	it("validates required keys", async () => {
+		const vault = await makeVault();
+
+		const result = await useCredential(vault, "test-service", ["key"] as const, (cred) => cred.key);
+
+		expect(result).toBe("sk-secret-123");
+
+		vault.destroy();
+	});
+
+	it("throws on missing required key", async () => {
+		const vault = await makeVault();
+
+		await expect(
+			useCredential(vault, "test-service", ["key", "nonexistent"] as const, (cred) => cred.key),
+		).rejects.toThrow('Missing required field "nonexistent"');
+
+		vault.destroy();
+	});
+
+	it("throws with context on malformed JSON", async () => {
+		const vault = await makeVault();
+		vault.retrieveBuffer = () => Buffer.from("not-json");
+
+		await expect(useCredential(vault, "test-service", () => "nope")).rejects.toThrow(
+			'Failed to parse credential for service "test-service"',
+		);
+
+		vault.destroy();
+	});
+
+	it("freezes parsed credential object", async () => {
+		const vault = await makeVault();
+
+		await expect(
+			useCredential(vault, "test-service", (cred) => {
+				(cred as Record<string, string>).newProp = "x";
+				return "should-not-reach";
+			}),
+		).rejects.toThrow(TypeError);
 
 		vault.destroy();
 	});

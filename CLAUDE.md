@@ -12,6 +12,7 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 **Wave Progress**
 - [x] Wave 2.1: Security Primitives — Ed25519 signing + irreversible classification (553 tests)
 - [x] Wave 2.2: Google Workspace CLI + Email Defense (583 tests)
+- [x] Wave 2.2b: Credential Zeroization — useCredential helper, V8 string lifetime minimization (652 tests)
 - [ ] Wave 2.3: OpenClaw + Sentinel Plugin
 - [ ] Wave 2.4: LLM Infrastructure (Plano routing, prompt caching, Promptfoo)
 
@@ -52,7 +53,7 @@ pnpm install
 ```bash
 pnpm install
 pnpm typecheck   # Verify TypeScript
-pnpm test         # Run all tests (542+)
+pnpm test         # Run all tests (652+)
 ```
 
 ### Running locally
@@ -75,7 +76,7 @@ sentinel chat     # Start interactive agent session with TUI confirmation
 | `docs/server-hardening.md` | Infrastructure hardening reference with Sentinel architecture mapping |
 | `docs/owasp-reviews/phase-0.md` | Phase 0 OWASP gate review (7 findings, all MEDIUM/LOW) |
 | `.claude/agents/security-reviewer.md` | Subagent prompt for parallel security review |
-| `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 6 security invariants |
+| `.claude/skills/security-audit/SKILL.md` | `/security-audit` skill — validates 12 security invariants |
 | `.claude/skills/upstream-sync/SKILL.md` | `/upstream-sync` skill — rebase on moltworker (user-only) |
 | `.rampart/policy.yaml` | Host-level Rampart firewall policy (tfstate, data protection, security code gate) |
 
@@ -188,6 +189,8 @@ These 12 rules are **non-negotiable**. Every PR must maintain them. Each has a r
 - Both `executor/credential-filter.ts` and `audit/redact.ts` import from types
 - Add new patterns here only — never maintain separate pattern lists
 - **Buffer-based APIs** — `decryptToBuffer()` and `vault.retrieveBuffer()` return `Buffer` for zeroization; callers MUST `.fill(0)` in `finally`. Prefer over string-returning `decrypt()`/`retrieve()`.
+- **`useCredential(vault, serviceId, fn)`** — callback-scoped vault access (`packages/crypto/src/use-credential.ts`). Buffer zeroed in `finally`; credential strings GC-eligible after callback returns. Use this for all new vault access — `decrypt()` and `retrieve()` are deprecated.
+- **GWS token injection** — `GOOGLE_WORKSPACE_CLI_TOKEN` env var (not `GOOGLE_ACCESS_TOKEN`); no CLI flags exist. OAuth refresh in `packages/executor/src/tools/gws-auth.ts`.
 
 ### Action Categories
 Four categories with graduated confirmation: `read` (auto-approve configurable), `write` (confirm), `write-irreversible` (always confirm + "cannot be undone" TUI warning), `dangerous` (always confirm). `write-irreversible` targets email send, calendar invites with attendees, financial transactions. Classifier in `packages/policy/src/classifier.ts`.
@@ -293,6 +296,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **Worktree dist/ independence** — git worktrees don't share `dist/` with main; workspace deps (e.g., `@sentinel/types`) need manual build in worktree: `npx tsup src/index.ts --format esm`
 - **Rampart blocks `.rampart/` writes** — standard policy `block-sensitive-writes` prevents agent from editing `.rampart/policy.yaml`; policy changes are human-only
 - **Rampart `**` glob quirk** — `**/path` requires ≥1 path segment; always include bare `path` variant alongside `**/path`
+- **Entrypoint ordering** — `entrypoint.ts` must open vault BEFORE `createToolRegistry()` — registry captures vault via closure for GWS token injection
 
 
 ## Build Progress
@@ -307,7 +311,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 | Rampart Integration | — | — | Host-level Rampart firewall v0.8.3, 45 standard + 3 Sentinel project policies, PreToolUse hooks |
 | Wave 2.1: Security Primitives | 553 | — | Ed25519 manifest signing, `write-irreversible` category, irreversible TUI warning |
 | Wave 2.2: GWS CLI + Email Defense | 583 | — | GWS tool integration, email injection scanner, per-agent scoping, credential zeroization (G1-G8), Docker hardening |
-| Wave 2.2b: Credential Zeroization | 652 | — | `useCredential()` helper, V8 string lifetime minimization, LLM proxy refactor, GWS vault migration, API deprecation |
+| Wave 2.2b: Credential Zeroization | 652 | #16 | `useCredential()` helper, V8 string lifetime minimization, LLM proxy refactor, GWS vault migration, API deprecation |
 
 ### Backlog
 

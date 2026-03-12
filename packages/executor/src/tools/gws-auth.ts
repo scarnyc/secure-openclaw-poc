@@ -1,14 +1,33 @@
 import type { CredentialVault } from "@sentinel/crypto";
 import { useCredential } from "@sentinel/crypto";
+import { z } from "zod";
+
+const TOKEN_REFRESH_BUFFER_MS = 60_000;
+
+const OAuthRefreshResponse = z.object({
+	access_token: z.string().min(1),
+	expires_in: z.number().positive(),
+});
+
+const REQUIRED_OAUTH_FIELDS = ["clientId", "clientSecret", "refreshToken", "accessToken"] as const;
 
 /**
  * Retrieve a valid Google Workspace access token from the vault.
  * Refreshes via OAuth2 if the token is expired or expiring within 60s.
  */
 export async function getGwsAccessToken(vault: CredentialVault): Promise<string> {
+	// NOTE: Access token intentionally escapes useCredential scope — subprocess injection requires a string.
+	// Token is short-lived (single GWS call).
 	return useCredential(vault, "google/oauth", async (creds) => {
-		const expiresAt = Number(creds.expiresAt);
-		if (expiresAt && Date.now() < expiresAt - 60_000) {
+		// Validate required credential fields
+		for (const field of REQUIRED_OAUTH_FIELDS) {
+			if (!creds[field]) {
+				throw new Error(`Missing required OAuth field "${field}" in google/oauth vault entry`);
+			}
+		}
+
+		const expiresAt = creds.expiresAt ? Number(creds.expiresAt) : 0;
+		if (!Number.isNaN(expiresAt) && Date.now() < expiresAt - TOKEN_REFRESH_BUFFER_MS) {
 			return creds.accessToken;
 		}
 
@@ -31,10 +50,7 @@ export async function getGwsAccessToken(vault: CredentialVault): Promise<string>
 			throw new Error(`OAuth token refresh failed: HTTP ${resp.status}`);
 		}
 
-		const data = (await resp.json()) as { access_token: string; expires_in: number };
-		if (!data.access_token) {
-			throw new Error("OAuth token refresh returned no access_token");
-		}
+		const data = OAuthRefreshResponse.parse(await resp.json());
 
 		// Store updated token back to vault
 		await vault.store("google/oauth", "oauth", {

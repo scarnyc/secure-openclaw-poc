@@ -33,18 +33,22 @@ export interface GwsParams {
 
 export type { GwsAgentScopes } from "@sentinel/types";
 
+export interface ExecuteGwsContext {
+	agentId?: string;
+	scopes?: GwsAgentScopes;
+	vault?: CredentialVault;
+}
+
 export async function executeGws(
 	params: GwsParams,
 	manifestId: string,
-	agentId?: string,
-	scopes?: GwsAgentScopes,
-	vault?: CredentialVault,
+	ctx?: ExecuteGwsContext,
 ): Promise<ToolResult> {
 	const start = Date.now();
 
 	// SENTINEL: Per-agent scope restriction (G4)
-	if (agentId && scopes?.[agentId]) {
-		const agentScope = scopes[agentId];
+	if (ctx?.agentId && ctx?.scopes?.[ctx.agentId]) {
+		const agentScope = ctx.scopes[ctx.agentId];
 		if (agentScope.denyServices?.includes(params.service)) {
 			return {
 				manifestId,
@@ -75,13 +79,22 @@ export async function executeGws(
 
 	try {
 		const env = stripSensitiveEnv(process.env);
-		if (vault) {
+		if (ctx?.vault) {
 			try {
-				const token = await getGwsAccessToken(vault);
+				const token = await getGwsAccessToken(ctx.vault);
 				env.GOOGLE_WORKSPACE_CLI_TOKEN = token;
-			} catch (_error) {
-				// Log but don't fail — fall back to keyring auth
-				console.warn("[gws] Vault token injection failed, falling back to keyring auth");
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : "Unknown";
+				console.error(`[gws] Vault token injection failed: ${msg}`);
+				if (process.env.SENTINEL_DOCKER === "true") {
+					return {
+						manifestId,
+						success: false,
+						error: "GWS authentication failed — vault token refresh error",
+						duration_ms: Date.now() - start,
+					};
+				}
+				console.warn("[gws] Falling back to keyring auth (local dev only)");
 			}
 		}
 
@@ -92,6 +105,7 @@ export async function executeGws(
 			extendEnv: false,
 			reject: false,
 		});
+		delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
 
 		if (result.exitCode !== 0) {
 			// Never include raw stderr — may contain credentials

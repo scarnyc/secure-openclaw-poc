@@ -88,50 +88,42 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 
 		// SENTINEL: Inject API key — prefer vault (useCredential) over process.env
-		// Vault keys are scoped to the callback; Buffer zeroed in finally
+		// Credential retrieval is separated from fetch to avoid catching fetch errors
+		// in the vault error handler (which would cause duplicate requests + misleading logs).
 		const authConfig = HOST_AUTH_HEADERS[targetHost];
 		if (authConfig) {
+			let credentialSet = false;
 			if (vault) {
 				try {
-					return await useCredential(vault, `llm/${targetHost}`, async (cred) => {
+					await useCredential(vault, `llm/${targetHost}`, (cred) => {
 						const value = authConfig.prefix ? `${authConfig.prefix}${cred.key}` : cred.key;
 						forwardHeaders.set(authConfig.headerName, value);
-						try {
-							const upstreamResponse = await fetch(targetUrl, {
-								method: c.req.method,
-								headers: forwardHeaders,
-								body: c.req.method !== "GET" ? c.req.raw.body : undefined,
-								duplex: "half",
-							});
-							return new Response(upstreamResponse.body, {
-								status: upstreamResponse.status,
-								headers: upstreamResponse.headers,
-							});
-						} finally {
-							forwardHeaders.delete(authConfig.headerName);
-						}
+						credentialSet = true;
 					});
 				} catch (error) {
 					if (error instanceof Error && error.message.startsWith("No credential found")) {
-						// Fall through to env var path
+						// Key not in vault — fall through to env var path
 					} else {
 						console.error(
-							`[llm-proxy] Vault retrieval failed for llm/${targetHost}: credential corrupted or inaccessible`,
+							`[llm-proxy] Vault credential failed for llm/${targetHost}: ${error instanceof Error ? error.message : "Unknown"}`,
 						);
-						// Fall through to env var path
+						return c.json({ error: "LLM proxy credential error" }, 500);
 					}
 				}
 			}
 
 			// env var fallback (existing behavior for non-vault deployments)
-			const apiKey = process.env[authConfig.envVar];
-			if (!apiKey) {
-				return c.json({ error: "LLM proxy configuration error" }, 500);
+			if (!credentialSet) {
+				const apiKey = process.env[authConfig.envVar];
+				if (!apiKey) {
+					return c.json({ error: "LLM proxy configuration error" }, 500);
+				}
+				const value = authConfig.prefix ? `${authConfig.prefix}${apiKey}` : apiKey;
+				forwardHeaders.set(authConfig.headerName, value);
 			}
-			const value = authConfig.prefix ? `${authConfig.prefix}${apiKey}` : apiKey;
-			forwardHeaders.set(authConfig.headerName, value);
 		}
 
+		// Single fetch path for both vault and env var credentials
 		try {
 			const upstreamResponse = await fetch(targetUrl, {
 				method: c.req.method,
@@ -152,6 +144,11 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 				`[llm-proxy] Upstream request failed: ${error instanceof Error ? error.message : "Unknown"}`,
 			);
 			return c.json({ error: "LLM proxy upstream error" }, 502);
+		} finally {
+			// Clean up auth header from forwardHeaders (both vault and env paths)
+			if (authConfig) {
+				forwardHeaders.delete(authConfig.headerName);
+			}
 		}
 	};
 }

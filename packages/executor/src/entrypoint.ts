@@ -36,7 +36,11 @@ if (vaultPassword && config.vaultPath) {
 	}
 }
 
-const registry = createToolRegistry(config.allowedRoots, config.gwsAgentScopes, vault);
+const registry = createToolRegistry({
+	allowedRoots: config.allowedRoots,
+	gwsScopes: config.gwsAgentScopes,
+	vault,
+});
 const app = createApp(config, auditLogger, registry, vault);
 
 const port = config.executor.port;
