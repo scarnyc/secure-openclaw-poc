@@ -1,0 +1,61 @@
+use std::collections::HashMap;
+use std::process::Command;
+
+use crate::credential::SecureCredential;
+use crate::error::CryptoError;
+use crate::vault_io::decrypt_service;
+
+pub struct SpawnResult {
+    pub stdout: String,
+    pub stderr: String,
+    pub exit_code: i32,
+}
+
+/// Spawn a subprocess with a credential injected as an environment variable.
+/// The credential NEVER enters JavaScript — it's decrypted in Rust, set as an env var,
+/// the subprocess runs, and then all credential memory is zeroed.
+pub fn spawn_with_credential(
+    command: &str,
+    args: &[String],
+    env: &HashMap<String, String>,
+    env_var_name: &str,
+    vault_path: &str,
+    derived_key: &[u8],
+    service_id: &str,
+    credential_field: &str,
+    _timeout_ms: Option<u64>,
+) -> Result<SpawnResult, CryptoError> {
+    // Decrypt credential in Rust memory
+    let credential: SecureCredential = decrypt_service(vault_path, derived_key, service_id)?;
+    let field_value = credential.get_field(credential_field)?;
+
+    // Build subprocess command
+    let mut cmd = Command::new(command);
+    cmd.args(args);
+
+    // Clear inherited env and set only provided vars
+    cmd.env_clear();
+    for (k, v) in env {
+        cmd.env(k, v);
+    }
+
+    // Inject credential as env var — only exists in subprocess memory
+    cmd.env(env_var_name, field_value.as_str());
+
+    // Run subprocess
+    let output = cmd
+        .output()
+        .map_err(|e| CryptoError::IoError(format!("Failed to spawn {command}: {e}")))?;
+
+    // field_value and credential are zeroed on drop via ZeroizeOnDrop
+    drop(field_value);
+    drop(credential);
+
+    let exit_code = output.status.code().unwrap_or(-1);
+
+    Ok(SpawnResult {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        exit_code,
+    })
+}

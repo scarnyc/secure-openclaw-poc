@@ -1,0 +1,27 @@
+{
+	"name": "@sentinel/crypto-native",
+	"version": "0.1.0",
+	"private": true,
+	"main": "index.js",
+	"types": "index.d.ts",
+	"napi": {
+		"name": "crypto-native",
+		"triples": {
+			"defaults": false,
+			"additional": [
+				"aarch64-apple-darwin",
+				"x86_64-unknown-linux-musl"
+			]
+		}
+	},
+	"scripts": {
+		"build": "napi build --platform --release",
+		"build:debug": "napi build --platform",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"@napi-rs/cli": "^2.18.0",
+		"@sentinel/crypto": "workspace:*",
+		"vitest": "^3.0.0"
+	}
+}
