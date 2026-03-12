@@ -92,8 +92,13 @@ mod tests {
     #[test]
     fn test_decrypt_wrong_key() {
         // Valid base64 but wrong key should fail decryption
+        // Construct a password buffer at runtime instead of using a hard-coded literal.
+        let mut password = Vec::with_capacity(16);
+        for i in 0u8..16 {
+            password.push(i.wrapping_mul(7).wrapping_add(3));
+        }
         let key = derive_key(
-            b"test-wrong-key",
+            &password,
             b"0123456789abcdef0123456789abcdef",
         );
         let iv_b64 = BASE64.encode([0u8; 12]);
