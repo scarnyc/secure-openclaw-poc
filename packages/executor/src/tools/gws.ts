@@ -79,23 +79,19 @@ export async function executeGws(
 		}
 	}
 
-	// Outbound email scanning: check subject/body for injection patterns before send
+	// Outbound email scanning: check subject/body for injection patterns before send.
+	// Email is write-irreversible — warn mode escalates to enforce (can't unsend).
 	if (params.args && params.service === "gmail" && GMAIL_SEND_PATTERNS.test(params.method)) {
-		GMAIL_SEND_PATTERNS.lastIndex = 0;
 		const mode = getModerationMode();
 		if (mode !== "off") {
 			const scanResult = scanOutboundEmail(params.args);
 			if (scanResult.flagged) {
-				if (mode === "enforce") {
-					return {
-						manifestId,
-						success: false,
-						error: `Outbound email blocked: ${scanResult.reason}`,
-						duration_ms: Date.now() - start,
-					};
-				}
-				// warn mode: log but proceed
-				console.warn(`[gws:outbound-scan] ${scanResult.reason}`);
+				return {
+					manifestId,
+					success: false,
+					error: `Outbound email blocked: ${scanResult.reason}`,
+					duration_ms: Date.now() - start,
+				};
 			}
 		}
 	}

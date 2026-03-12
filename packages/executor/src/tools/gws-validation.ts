@@ -19,9 +19,10 @@ function validateEmailArray(value: unknown, fieldName: string, errors: string[])
 	if (value.length > MAX_RECIPIENTS_PER_FIELD) {
 		errors.push(`${fieldName} exceeds maximum of ${MAX_RECIPIENTS_PER_FIELD} recipients`);
 	}
-	for (const email of value) {
+	for (let i = 0; i < value.length; i++) {
+		const email = value[i];
 		if (typeof email !== "string" || !EMAIL_REGEX.test(email)) {
-			errors.push(`${fieldName} contains invalid email: ${String(email)}`);
+			errors.push(`${fieldName}[${i}] contains invalid email`);
 		}
 	}
 	return value as string[];
@@ -39,8 +40,8 @@ export function validateGwsSendArgs(
 
 	const errors: string[] = [];
 
-	// to: required, array of emails
-	if (!args.to) {
+	// to: required, non-empty array of emails
+	if (!args.to || !Array.isArray(args.to) || args.to.length === 0) {
 		errors.push("to is required for gmail send");
 	}
 	const toList = validateEmailArray(args.to, "to", errors);

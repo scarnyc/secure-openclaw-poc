@@ -30,18 +30,26 @@ describe("validateGwsSendArgs", () => {
 		expect(result.errors).toContain("to is required for gmail send");
 	});
 
-	it("invalid email format rejects", () => {
+	it("empty `to: []` rejects", () => {
+		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+			to: [],
+			subject: "Hello",
+		});
+		expect(result.valid).toBe(false);
+		expect(result.errors).toContain("to is required for gmail send");
+	});
+
+	it("invalid email format rejects without echoing raw input", () => {
 		const result = validateGwsSendArgs("gmail", "users.messages.send", {
 			to: ["not-an-email", "@missing.com"],
 			subject: "Hello",
 		});
 		expect(result.valid).toBe(false);
-		expect(result.errors).toEqual(
-			expect.arrayContaining([
-				expect.stringContaining("not-an-email"),
-				expect.stringContaining("@missing.com"),
-			]),
-		);
+		expect(result.errors).toHaveLength(2);
+		// Error messages use index, not raw email values
+		expect(result.errors[0]).toContain("to[0]");
+		expect(result.errors[1]).toContain("to[1]");
+		expect(result.errors[0]).not.toContain("not-an-email");
 	});
 
 	it(">50 recipients in `to` rejects", () => {

@@ -21,6 +21,7 @@ const ALLOWED_RESPONSE_HEADERS = new Set([
 	"anthropic-ratelimit-tokens-limit",
 	"anthropic-ratelimit-tokens-remaining",
 	"anthropic-ratelimit-tokens-reset",
+	"x-goog-request-id",
 ]);
 
 const ALLOWED_LLM_HOSTS = new Set([

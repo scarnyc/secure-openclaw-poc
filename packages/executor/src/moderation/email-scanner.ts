@@ -161,9 +161,7 @@ export function scanOutboundEmail(args: Record<string, unknown>): EmailScanResul
 	let maxSeverity: "low" | "medium" | "high" = "low";
 	const severityOrder = { low: 0, medium: 1, high: 2 };
 
-	const fieldsToScan = ["subject", "body"];
-	for (const field of fieldsToScan) {
-		const value = args[field];
+	for (const [field, value] of Object.entries(args)) {
 		if (typeof value !== "string") continue;
 		const result = scanEmailContent(value);
 		if (result.flagged) {

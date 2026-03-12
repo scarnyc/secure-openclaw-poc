@@ -91,6 +91,29 @@ describe("redactAllCredentialsWithEncoding", () => {
 		expect(result).not.toContain("sk-ant");
 	});
 
+	it("handles invalid percent-encoding without crashing", () => {
+		const input = "key=%ZZinvalid%encoding%here";
+		expect(() => redactAllCredentialsWithEncoding(input)).not.toThrow();
+	});
+
+	it("detects double-encoded credential (base64 of URL-encoded key)", () => {
+		// URL-encode then base64-encode an API key
+		const key = "sk-ant-abc123-testkey-for-double";
+		const urlEncoded = encodeURIComponent(key);
+		const doubleEncoded = Buffer.from(urlEncoded).toString("base64");
+		const input = `data: ${doubleEncoded}`;
+		const result = redactAllCredentialsWithEncoding(input);
+		// Base64 pass should decode to URL-encoded form, which contains the literal key
+		expect(result).toContain("[REDACTED");
+	});
+
+	it("does not corrupt non-credential percent-encoded segments", () => {
+		const input = "path=%2Fusr%2Flocal%2Fbin&name=hello%20world";
+		const result = redactAllCredentialsWithEncoding(input);
+		// Non-credential segments should pass through unchanged
+		expect(result).toContain("path=%2Fusr%2Flocal%2Fbin");
+	});
+
 	it("does not cause performance regression on normal strings", () => {
 		const normalText = "Hello, this is a normal email body without any encoded content. ".repeat(
 			100,
