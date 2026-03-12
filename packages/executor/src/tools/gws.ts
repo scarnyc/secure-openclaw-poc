@@ -150,7 +150,7 @@ export async function executeGws(
 				env.GOOGLE_WORKSPACE_CLI_TOKEN = token;
 			} catch (error) {
 				const msg = error instanceof Error ? error.message : "Unknown";
-				console.error(`[gws] Vault token injection failed: ${msg}`);
+				console.error("[gws] Vault token injection failed");
 				if (process.env.SENTINEL_DOCKER === "true") {
 					return {
 						manifestId,
