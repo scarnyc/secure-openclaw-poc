@@ -128,4 +128,60 @@ describe("getGwsAccessToken", () => {
 			expect(msg).not.toContain("test-refresh-token");
 		}
 	});
+
+	it("throws when access_token missing from 200 response", async () => {
+		const pastExpiry = String(Date.now() - 60_000);
+		await vault.store("google/oauth", "oauth", {
+			...baseCreds,
+			expiresAt: pastExpiry,
+		});
+
+		mockFetch.mockResolvedValueOnce(
+			new Response(JSON.stringify({}), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		);
+
+		await expect(getGwsAccessToken(vault)).rejects.toThrow();
+	});
+
+	it("stores refreshed token back to vault", async () => {
+		// First call: expired token triggers refresh
+		const pastExpiry = String(Date.now() - 60_000);
+		await vault.store("google/oauth", "oauth", {
+			...baseCreds,
+			expiresAt: pastExpiry,
+		});
+
+		mockFetch.mockResolvedValueOnce(
+			new Response(JSON.stringify({ access_token: "refreshed-token", expires_in: 3600 }), {
+				status: 200,
+				headers: { "Content-Type": "application/json" },
+			}),
+		);
+
+		const token1 = await getGwsAccessToken(vault);
+		expect(token1).toBe("refreshed-token");
+		expect(mockFetch).toHaveBeenCalledOnce();
+
+		// Second call: stored token should still be valid (no second fetch)
+		const token2 = await getGwsAccessToken(vault);
+		expect(token2).toBe("refreshed-token");
+		// fetch should NOT have been called again — the refreshed token was stored with future expiry
+		expect(mockFetch).toHaveBeenCalledOnce();
+	});
+
+	it("throws on missing required credential field", async () => {
+		const pastExpiry = String(Date.now() - 60_000);
+		// Store creds without clientSecret
+		await vault.store("google/oauth", "oauth", {
+			clientId: "test-client-id",
+			refreshToken: "test-refresh-token",
+			accessToken: "valid-access-token",
+			expiresAt: pastExpiry,
+		});
+
+		await expect(getGwsAccessToken(vault)).rejects.toThrow("clientSecret");
+	});
 });

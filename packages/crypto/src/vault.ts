@@ -2,10 +2,9 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { EncryptedBlob } from "./encryption.js";
 import { DecryptionError, decrypt, decryptToBuffer, encrypt } from "./encryption.js";
 import { deriveKey, generateSalt } from "./key-derivation.js";
+import { warnOnce } from "./warn-once.js";
 
 const VERIFIER_PLAINTEXT = "sentinel-vault-v1";
-
-let retrieveWarned = false;
 
 interface VaultEntry {
 	type: string;
@@ -92,12 +91,10 @@ export class CredentialVault {
 	 * Returns V8 immutable strings that cannot be zeroed from memory.
 	 */
 	async retrieve(serviceId: string): Promise<Record<string, string>> {
-		if (!retrieveWarned) {
-			console.warn(
-				"[sentinel/crypto] vault.retrieve() is deprecated — use retrieveBuffer() or useCredential()",
-			);
-			retrieveWarned = true;
-		}
+		warnOnce(
+			"vault.retrieve",
+			"[sentinel/crypto] vault.retrieve() is deprecated — use retrieveBuffer() or useCredential()",
+		);
 		const entry = this.data.entries[serviceId];
 		if (!entry) {
 			throw new Error(`No credential found for service: ${serviceId}`);
