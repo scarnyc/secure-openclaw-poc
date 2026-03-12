@@ -28,7 +28,8 @@ export function createSseCredentialFilter(): TransformStream<Uint8Array, Uint8Ar
 					}
 					return line;
 				});
-				controller.enqueue(encoder.encode(filteredLines.join("\n")));
+				// Append \n\n to maintain valid SSE framing even on overflow flush
+				controller.enqueue(encoder.encode(`${filteredLines.join("\n")}\n\n`));
 				buffer = "";
 				return;
 			}

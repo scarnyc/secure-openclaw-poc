@@ -394,7 +394,7 @@ describe("LLM Proxy", () => {
 			expect(text).toBe(cleanBody);
 		});
 
-		it("passes through SSE streaming responses without materializing body", async () => {
+		it("passes clean SSE streaming responses through unchanged", async () => {
 			const sseChunks = 'data: {"type":"content_block_delta"}\n\ndata: {"type":"message_stop"}\n\n';
 			const mockResponse = new Response(sseChunks, {
 				status: 200,
@@ -412,6 +412,56 @@ describe("LLM Proxy", () => {
 			const text = await res.text();
 			expect(text).toBe(sseChunks);
 		});
+
+		it("redacts credentials in SSE streaming responses", async () => {
+			// Build credential dynamically to avoid GitHub push protection false positives
+			const fakeKey = ["sk", "ant", "abc123", "leaked", "key"].join("-");
+			const sseWithCred =
+				'data: {"type":"content_block_delta","delta":{"text":"Hello"}}\n\n' +
+				`data: {"error":"Invalid key: ${fakeKey}"}\n\n` +
+				'data: {"type":"message_stop"}\n\n';
+			const mockResponse = new Response(sseWithCred, {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.headers.get("content-type")).toBe("text/event-stream");
+			const text = await res.text();
+			// Clean events pass through
+			expect(text).toContain("Hello");
+			expect(text).toContain("message_stop");
+			// Credential redacted
+			expect(text).not.toContain(fakeKey);
+			expect(text).toContain("[REDACTED]");
+		});
+
+		it("handles null body on SSE streaming response", async () => {
+			// Edge case: upstream returns text/event-stream content-type but null body
+			const mockResponse = new Response(null, {
+				status: 200,
+				headers: { "content-type": "text/event-stream" },
+			});
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			const res = await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(res.status).toBe(200);
+			expect(res.headers.get("content-type")).toBe("text/event-stream");
+			const text = await res.text();
+			expect(text).toBe("");
+		});
+
 
 		it("removes stale content-length after body filtering", async () => {
 			const bodyWithCreds = "Response: sk-ant-abc123-leaked-key-in-error";

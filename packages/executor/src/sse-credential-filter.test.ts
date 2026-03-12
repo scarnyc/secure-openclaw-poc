@@ -80,6 +80,27 @@ describe("SSE Credential Filter", () => {
 		expect(output).toContain('data: {"type":"message_stop"}\n\n');
 	});
 
+	it("maintains SSE framing on overflow flush (>1MB buffer)", async () => {
+		// Build a payload that exceeds MAX_SSE_BUFFER_SIZE (1MB) without any \n\n boundaries
+		// The overflow path should still produce valid SSE framing with trailing \n\n
+		const fakeKey = ["sk", "ant", "overflow", "test"].join("-");
+		const lineContent = `data: {"text":"${"x".repeat(500)}","key":"${fakeKey}"}\n`;
+		// ~500 bytes per line, need >1MB = ~2100 lines without \n\n
+		const lines: string[] = [];
+		for (let i = 0; i < 2200; i++) {
+			lines.push(lineContent);
+		}
+		const input = lines.join("");
+
+		const output = await filterSse(input);
+
+		// Output should end with \n\n for valid SSE framing
+		expect(output.endsWith("\n\n")).toBe(true);
+		// Credential should be redacted
+		expect(output).not.toContain(fakeKey);
+		expect(output).toContain("[REDACTED]");
+	});
+
 	it("processes 1000 events in under 100ms", async () => {
 		const events: string[] = [];
 		for (let i = 0; i < 1000; i++) {
