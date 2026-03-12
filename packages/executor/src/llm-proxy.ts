@@ -98,9 +98,10 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 
 		// SENTINEL: SSRF guard — verify target URL doesn't resolve to private IPs (Phase 1)
 		// DNS rebinding defense: fixed 3-host TLS allowlist mitigates; full IP pinning requires undici Agent (future work)
+		let ssrfResolvedIps: string[] | undefined;
 		try {
 			const ssrfResult = await checkSsrf(targetUrl);
-			void ssrfResult; // resolved IPs available for future IP-pinned fetch
+			ssrfResolvedIps = ssrfResult?.resolvedIps;
 		} catch (error) {
 			if (error instanceof SsrfError) {
 				return c.json({ error: "Blocked: SSRF protection" }, 403);
@@ -148,6 +149,8 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 
 		// Single fetch path for both vault and env var credentials
+		// TODO: IP-pinned fetch via undici Agent using ssrfResolvedIps for DNS rebinding defense
+		void ssrfResolvedIps; // retained for future IP-pinned fetch (requires undici Agent)
 		try {
 			const upstreamResponse = await fetch(targetUrl, {
 				method: c.req.method,

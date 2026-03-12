@@ -55,6 +55,9 @@ export class LoopGuard {
 		if (merged.maxHistorySize < 1 || merged.windowMs < 1) {
 			throw new Error("maxHistorySize and windowMs must be positive");
 		}
+		if (merged.maxAgents < 1) {
+			throw new Error("maxAgents must be positive");
+		}
 		this.config = Object.freeze(merged);
 	}
 

@@ -83,20 +83,26 @@ export function createApp(
 	app.use("*", requestIdMiddleware);
 
 	// SENTINEL: Body size limits (LOW-17) — defense-in-depth against DoS
-	app.use("/execute", async (c, next) => {
-		const contentLength = c.req.header("content-length");
-		if (contentLength && Number.parseInt(contentLength, 10) > 10 * 1024 * 1024) {
-			return c.json({ error: "Request body too large (max 10MB)" }, 413);
-		}
-		return next();
-	});
-	app.use("/proxy/llm/*", async (c, next) => {
-		const contentLength = c.req.header("content-length");
-		if (contentLength && Number.parseInt(contentLength, 10) > 100 * 1024 * 1024) {
-			return c.json({ error: "Request body too large (max 100MB)" }, 413);
-		}
-		return next();
-	});
+	// Checks Content-Length when present; rejects chunked (no CL) in Docker mode
+	const createBodyLimitMiddleware = (maxBytes: number, label: string) => {
+		return async (c: import("hono").Context, next: import("hono").Next) => {
+			const contentLength = c.req.header("content-length");
+			if (contentLength) {
+				if (Number.parseInt(contentLength, 10) > maxBytes) {
+					return c.json({ error: `Request body too large (max ${label})` }, 413);
+				}
+			} else if (
+				process.env.SENTINEL_DOCKER === "true" &&
+				(c.req.method === "POST" || c.req.method === "PUT" || c.req.method === "PATCH")
+			) {
+				// In Docker: require Content-Length to prevent chunked transfer bypass
+				return c.json({ error: "Content-Length header required" }, 411);
+			}
+			return next();
+		};
+	};
+	app.use("/execute", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
+	app.use("/proxy/llm/*", createBodyLimitMiddleware(100 * 1024 * 1024, "100MB"));
 
 	// SENTINEL: HMAC-SHA256 response signing for integrity verification (B4)
 	// Placed before routes so all responses (including /health) get signed
@@ -113,7 +119,9 @@ export function createApp(
 	const authMiddleware = createAuthMiddleware(config.authToken);
 	if (!config.authToken) {
 		if (process.env.SENTINEL_DOCKER === "true") {
-			console.error("[sentinel] CRITICAL: Docker mode without auth token — this should not happen");
+			throw new Error(
+				"[sentinel] FATAL: Docker mode without auth token — refusing to start unauthenticated",
+			);
 		} else {
 			console.warn(
 				"[sentinel] WARNING: No authToken configured — running without authentication (local dev)",

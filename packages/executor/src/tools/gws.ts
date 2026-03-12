@@ -148,8 +148,8 @@ export async function executeGws(
 			try {
 				const token = await getGwsAccessToken(ctx.vault);
 				env.GOOGLE_WORKSPACE_CLI_TOKEN = token;
-			} catch (error) {
-				const msg = error instanceof Error ? error.message : "Unknown";
+			} catch (_error) {
+				// Never log error.message — may contain OAuth tokens or account identifiers
 				console.error("[gws] Vault token injection failed");
 				if (process.env.SENTINEL_DOCKER === "true") {
 					return {
@@ -163,26 +163,34 @@ export async function executeGws(
 			}
 		}
 
-		const result = await execa("gws", cliArgs, {
-			timeout: 30_000,
-			killSignal: "SIGKILL",
-			env,
-			extendEnv: false,
-			reject: false,
-		});
-		delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
+		let exitCode: number | undefined;
+		let stdout: string;
+		try {
+			const result = await execa("gws", cliArgs, {
+				timeout: 30_000,
+				killSignal: "SIGKILL",
+				env,
+				extendEnv: false,
+				reject: false,
+			});
+			exitCode = result.exitCode;
+			stdout = result.stdout as string;
+		} finally {
+			// SENTINEL: Always clean token from env, even on error (LOW-15)
+			delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
+		}
 
-		if (result.exitCode !== 0) {
+		if (exitCode !== 0) {
 			// Never include raw stderr — may contain credentials
 			return {
 				manifestId,
 				success: false,
-				error: `gws exited with code ${result.exitCode}`,
+				error: `gws exited with code ${exitCode}`,
 				duration_ms: Date.now() - start,
 			};
 		}
 
-		let output = result.stdout;
+		let output = stdout;
 
 		// Email scanning: scan FULL output before truncation (inbound email is untrusted).
 		// Scanning after truncation would let payloads at the boundary bypass detection.

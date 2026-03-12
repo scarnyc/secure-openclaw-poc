@@ -91,7 +91,8 @@ const MAX_RECURSIVE_INPUT_SIZE = 65_536; // 64KB
  */
 export function recursiveContainsCredential(text: string, depth = 0): boolean {
 	if (depth >= MAX_RECURSIVE_DEPTH || text.length > MAX_RECURSIVE_INPUT_SIZE) {
-		return false;
+		// Fail-safe: if we can't prove there are no credentials, assume there might be
+		return true;
 	}
 
 	// Check current level

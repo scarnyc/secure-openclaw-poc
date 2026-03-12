@@ -345,9 +345,9 @@ describe("classify", () => {
 					},
 				],
 			};
-			// Long regex should be silently ignored (returns false), falling back to default category
+			// Long regex should fail-safe (override applies), using the more restrictive category
 			const result = classify(manifest, customConfig);
-			expect(result.category).toBe("read"); // default, not "dangerous"
+			expect(result.category).toBe("dangerous"); // fail-safe: override applies
 		});
 
 		it("allows regex patterns at exactly 200 chars", () => {

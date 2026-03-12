@@ -29,6 +29,9 @@ export class RateLimiter {
 		this.emissionInterval = config.period / config.rate;
 		this.period = config.period;
 		this.maxAgents = config.maxAgents ?? 1000;
+		if (this.maxAgents < 1) {
+			throw new Error("maxAgents must be positive");
+		}
 
 		if (config.dbPath) {
 			this.db = new Database(config.dbPath);
@@ -110,15 +113,22 @@ export class RateLimiter {
 	private flush(): void {
 		if (!this.db || this.dirty.size === 0) return;
 
-		const flushTransaction = this.db.transaction(() => {
-			for (const agentId of this.dirty) {
-				const tat = this.tats.get(agentId);
-				if (tat !== undefined) {
-					this.upsertStmt?.run(agentId, tat);
+		try {
+			const flushTransaction = this.db.transaction(() => {
+				for (const agentId of this.dirty) {
+					const tat = this.tats.get(agentId);
+					if (tat !== undefined) {
+						this.upsertStmt?.run(agentId, tat);
+					}
 				}
-			}
-		});
-		flushTransaction();
+			});
+			flushTransaction();
+		} catch (err) {
+			console.error(
+				`[rate-limiter] Failed to flush state to SQLite: ${err instanceof Error ? err.message : String(err)}`,
+			);
+			// Continue with in-memory state — rate limiting still functional
+		}
 		this.dirty.clear();
 	}
 

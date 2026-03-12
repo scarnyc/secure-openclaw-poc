@@ -43,7 +43,11 @@ const registry = createToolRegistry({
 	gwsScopes: config.gwsAgentScopes,
 	vault,
 });
-const app = createApp(config, auditLogger, registry, vault);
+// SENTINEL: Generate HMAC secret for response signing (B4 pen test finding)
+const { randomBytes: generateHmacBytes } = await import("node:crypto");
+const hmacSecret = generateHmacBytes(32);
+
+const app = createApp(config, auditLogger, registry, vault, hmacSecret);
 
 const port = config.executor.port;
 const host = "0.0.0.0";

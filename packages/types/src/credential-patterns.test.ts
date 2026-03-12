@@ -230,21 +230,23 @@ describe("recursiveContainsCredential", () => {
 		expect(recursiveContainsCredential(base64Second)).toBe(true);
 	});
 
-	it("respects depth limit — depth 5 nesting returns false", () => {
+	it("returns true (fail-safe) when depth limit exceeded — depth 5 nesting", () => {
 		const credential = "sk-ant-abc123-deeply-nested-key";
 		let encoded: string = credential;
 		for (let i = 0; i < 5; i++) {
 			encoded = Buffer.from(encoded).toString("base64");
 		}
-		expect(recursiveContainsCredential(encoded)).toBe(false);
+		// Fail-safe: can't prove no credentials at this depth, so assume there might be
+		expect(recursiveContainsCredential(encoded)).toBe(true);
 	});
 
-	it("bails on oversized input (100KB) without performance regression", () => {
+	it("returns true (fail-safe) on oversized input (100KB) without performance regression", () => {
 		const largeBlob = "A".repeat(100_000);
 		const start = performance.now();
 		const result = recursiveContainsCredential(largeBlob);
 		const elapsed = performance.now() - start;
-		expect(result).toBe(false);
+		// Fail-safe: oversized input treated as potentially containing credentials
+		expect(result).toBe(true);
 		expect(elapsed).toBeLessThan(50);
 	});
 

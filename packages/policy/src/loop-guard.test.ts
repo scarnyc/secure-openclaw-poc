@@ -183,6 +183,11 @@ describe("LoopGuard", () => {
 		expect(result.duplicateCount).toBe(1); // fresh start, only 1 call
 	});
 
+	it("throws on maxAgents < 1", () => {
+		expect(() => new LoopGuard({ maxAgents: 0 })).toThrow("maxAgents must be positive");
+		expect(() => new LoopGuard({ maxAgents: -1 })).toThrow("maxAgents must be positive");
+	});
+
 	it("custom thresholds are respected", () => {
 		const guard = new LoopGuard({ warnThreshold: 2, blockThreshold: 3 });
 		guard.check(agentId, tool, params);

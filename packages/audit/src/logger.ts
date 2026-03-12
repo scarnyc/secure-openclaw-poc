@@ -288,30 +288,70 @@ export class AuditLogger {
 	}
 
 	close(): void {
+		// SENTINEL: Zeroize signing key buffer to minimize credential exposure window
+		if (this.signingKey) {
+			this.signingKey.fill(0);
+		}
 		if (this.db) {
 			this.db.close();
 			this.db = null;
 		}
 	}
 
-	// SENTINEL: auto-generate Ed25519 keypair when no explicit signingKey provided
+	// SENTINEL: auto-generate Ed25519 keypair when no explicit signingKey provided.
+	// Key stored in separate file (not in audit DB) to prevent co-location with signed data.
 	private loadOrGenerateSigningKey(db: Database.Database): Buffer {
-		const existingKey = db
+		const { existsSync, readFileSync, writeFileSync } =
+			require("node:fs") as typeof import("node:fs");
+		const { dirname, join } = require("node:path") as typeof import("node:path");
+
+		// Key file lives alongside the audit DB but is a separate file
+		const dbPath = (db as unknown as { name: string }).name;
+		const keyDir = dirname(dbPath);
+		const privateKeyPath = join(keyDir, "audit-signing.key");
+		const publicKeyPath = join(keyDir, "audit-signing.pub");
+
+		// Check for key file first
+		if (existsSync(privateKeyPath)) {
+			const privateKeyHex = readFileSync(privateKeyPath, "utf-8").trim();
+			// Store public key in audit_meta if not already there (migration path)
+			if (existsSync(publicKeyPath)) {
+				const pubHex = readFileSync(publicKeyPath, "utf-8").trim();
+				const insertMeta = db.prepare(
+					"INSERT OR REPLACE INTO audit_meta (key, value) VALUES (?, ?)",
+				);
+				insertMeta.run("auto_signing_public_key", pubHex);
+			}
+			return Buffer.from(privateKeyHex, "hex");
+		}
+
+		// Migrate from old in-DB storage
+		const existingDbKey = db
 			.prepare("SELECT value FROM audit_meta WHERE key = ?")
 			.get("auto_signing_private_key") as { value: string } | undefined;
 
-		if (existingKey) {
-			return Buffer.from(existingKey.value, "hex");
+		if (existingDbKey) {
+			// Migrate: write to file, remove from DB
+			writeFileSync(privateKeyPath, existingDbKey.value, { mode: 0o600 });
+			const existingPubKey = db
+				.prepare("SELECT value FROM audit_meta WHERE key = ?")
+				.get("auto_signing_public_key") as { value: string } | undefined;
+			if (existingPubKey) {
+				writeFileSync(publicKeyPath, existingPubKey.value, { mode: 0o644 });
+			}
+			db.prepare("DELETE FROM audit_meta WHERE key = ?").run("auto_signing_private_key");
+			return Buffer.from(existingDbKey.value, "hex");
 		}
 
 		// Generate new keypair
 		const { publicKey, privateKey } = generateKeyPair();
 
+		writeFileSync(privateKeyPath, privateKey.toString("hex"), { mode: 0o600 });
+		writeFileSync(publicKeyPath, publicKey.toString("hex"), { mode: 0o644 });
+
+		// Store public key in audit_meta for easy retrieval by getSigningPublicKey()
 		const insertMeta = db.prepare("INSERT OR REPLACE INTO audit_meta (key, value) VALUES (?, ?)");
-		db.transaction(() => {
-			insertMeta.run("auto_signing_private_key", privateKey.toString("hex"));
-			insertMeta.run("auto_signing_public_key", publicKey.toString("hex"));
-		})();
+		insertMeta.run("auto_signing_public_key", publicKey.toString("hex"));
 
 		return privateKey;
 	}

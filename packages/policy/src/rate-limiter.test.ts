@@ -105,6 +105,15 @@ describe("RateLimiter (GCRA)", () => {
 		);
 	});
 
+	it("throws on maxAgents < 1", () => {
+		expect(() => new RateLimiter({ rate: 10, period: 1000, maxAgents: 0 })).toThrow(
+			"maxAgents must be positive",
+		);
+		expect(() => new RateLimiter({ rate: 10, period: 1000, maxAgents: -1 })).toThrow(
+			"maxAgents must be positive",
+		);
+	});
+
 	it("evicts oldest agent when maxAgents exceeded", () => {
 		const limiter = new RateLimiter({ rate: 10, period: 1000, maxAgents: 3 });
 		limiter.check("agent-1");

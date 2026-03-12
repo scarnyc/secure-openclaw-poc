@@ -53,10 +53,13 @@ export async function executeEditFile(
 	// Uses params.path (user-supplied) not guard.resolved, because realpath() already
 	// resolved the symlink — opening guard.resolved would bypass the symlink check.
 	try {
-		// Read with O_NOFOLLOW to reject symlinks at open time
+		// SENTINEL: TOCTOU mitigation — O_NOFOLLOW rejects symlinks; fstat verifies same inode
 		const readFd = await open(params.path, constants.O_RDONLY | constants.O_NOFOLLOW);
 		let content: string;
+		let readIno: bigint;
 		try {
+			const readStat = await readFd.stat({ bigint: true });
+			readIno = readStat.ino;
 			content = await readFd.readFile("utf-8");
 		} finally {
 			await readFd.close();
@@ -82,12 +85,21 @@ export async function executeEditFile(
 
 		const updated = content.replace(params.old_string, params.new_string);
 
-		// Write with O_NOFOLLOW to reject symlinks at open time
+		// Write with O_NOFOLLOW + verify inode matches read (TOCTOU defense)
 		const writeFd = await open(
 			params.path,
 			constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
 		);
 		try {
+			const writeStat = await writeFd.stat({ bigint: true });
+			if (writeStat.ino !== readIno) {
+				return {
+					manifestId,
+					success: false,
+					error: "Access denied: file changed between read and write (TOCTOU detected)",
+					duration_ms: Date.now() - start,
+				};
+			}
 			await writeFd.writeFile(updated, "utf-8");
 		} finally {
 			await writeFd.close();
