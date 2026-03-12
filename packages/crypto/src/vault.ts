@@ -2,6 +2,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import type { EncryptedBlob } from "./encryption.js";
 import { DecryptionError, decrypt, decryptToBuffer, encrypt } from "./encryption.js";
 import { deriveKey, generateSalt } from "./key-derivation.js";
+import { warnOnce } from "./warn-once.js";
 
 const VERIFIER_PLAINTEXT = "sentinel-vault-v1";
 
@@ -52,15 +53,20 @@ export class CredentialVault {
 		const salt = Buffer.from(data.salt, "base64");
 		const key = await deriveKey(masterPassword, salt);
 
-		// Validate password by decrypting verifier
-		const verified = decrypt(
+		// Validate password by decrypting verifier (Buffer-based to avoid V8 string)
+		const buf = decryptToBuffer(
 			key,
 			data.verifier.iv,
 			data.verifier.authTag,
 			data.verifier.ciphertext,
 		);
-		if (verified !== VERIFIER_PLAINTEXT) {
-			throw new DecryptionError("Invalid master password");
+		try {
+			const verified = buf.toString("utf8");
+			if (verified !== VERIFIER_PLAINTEXT) {
+				throw new DecryptionError("Invalid master password");
+			}
+		} finally {
+			buf.fill(0);
 		}
 
 		return new CredentialVault(vaultPath, key, data);
@@ -80,7 +86,15 @@ export class CredentialVault {
 		await this.save();
 	}
 
+	/**
+	 * @deprecated Use `retrieveBuffer()` or `useCredential()` instead.
+	 * Returns V8 immutable strings that cannot be zeroed from memory.
+	 */
 	async retrieve(serviceId: string): Promise<Record<string, string>> {
+		warnOnce(
+			"vault.retrieve",
+			"[sentinel/crypto] vault.retrieve() is deprecated — use retrieveBuffer() or useCredential()",
+		);
 		const entry = this.data.entries[serviceId];
 		if (!entry) {
 			throw new Error(`No credential found for service: ${serviceId}`);

@@ -41,9 +41,15 @@ export async function chatCommand(config: SentinelConfig, _dataDir: string): Pro
 	// Get API key from vault — distinguish missing key from corruption/decryption errors
 	let apiKey: string;
 	try {
-		const creds = await vault.retrieve("anthropic");
-		apiKey = creds.key;
-		if (!apiKey) throw new Error("No API key found");
+		const buf = vault.retrieveBuffer("anthropic");
+		try {
+			const parsed = JSON.parse(buf.toString("utf8")) as Record<string, string>;
+			apiKey = parsed.key;
+			// V8 string lifetime = session; Docker mode uses executor vault proxy
+			if (!apiKey) throw new Error("No API key found");
+		} finally {
+			buf.fill(0);
+		}
 	} catch (err: unknown) {
 		vault.destroy();
 		const msg = err instanceof Error ? err.message : "Unknown error";
@@ -57,7 +63,7 @@ export async function chatCommand(config: SentinelConfig, _dataDir: string): Pro
 
 	// Start executor (in-process for local dev)
 	const auditLogger = new AuditLogger(config.auditLogPath);
-	const registry = createToolRegistry(config.allowedRoots);
+	const registry = createToolRegistry({ allowedRoots: config.allowedRoots });
 	const app = createApp(config, auditLogger, registry);
 
 	const server = serve({

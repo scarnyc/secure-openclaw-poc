@@ -6,9 +6,15 @@ vi.mock("execa", () => ({
 	execa: vi.fn(),
 }));
 
+vi.mock("./gws-auth.js", () => ({
+	getGwsAccessToken: vi.fn(),
+}));
+
 import { execa } from "execa";
+import { getGwsAccessToken } from "./gws-auth.js";
 
 const mockExeca = execa as unknown as MockInstance;
+const mockGetGwsAccessToken = getGwsAccessToken as unknown as MockInstance;
 
 function makeParams(overrides: Partial<GwsParams> = {}): GwsParams {
 	return {
@@ -21,6 +27,10 @@ function makeParams(overrides: Partial<GwsParams> = {}): GwsParams {
 describe("executeGws", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+	});
+
+	afterEach(() => {
+		delete process.env.SENTINEL_DOCKER;
 	});
 
 	it("builds correct CLI args from service + method", async () => {
@@ -201,12 +211,10 @@ describe("executeGws", () => {
 					denyServices: ["gmail"],
 				},
 			};
-			const result = await executeGws(
-				makeParams({ service: "gmail" }),
-				"test-id",
-				"agent-research",
+			const result = await executeGws(makeParams({ service: "gmail" }), "test-id", {
+				agentId: "agent-research",
 				scopes,
-			);
+			});
 			expect(result.success).toBe(false);
 			expect(result.error).toContain("not authorized for service");
 			expect(mockExeca).not.toHaveBeenCalled();
@@ -218,12 +226,10 @@ describe("executeGws", () => {
 					allowedServices: ["calendar"],
 				},
 			};
-			const result = await executeGws(
-				makeParams({ service: "gmail" }),
-				"test-id",
-				"agent-calendar",
+			const result = await executeGws(makeParams({ service: "gmail" }), "test-id", {
+				agentId: "agent-calendar",
 				scopes,
-			);
+			});
 			expect(result.success).toBe(false);
 			expect(result.error).toContain("not authorized for service");
 			expect(mockExeca).not.toHaveBeenCalled();
@@ -236,12 +242,10 @@ describe("executeGws", () => {
 					allowedServices: ["calendar", "gmail"],
 				},
 			};
-			const result = await executeGws(
-				makeParams({ service: "gmail" }),
-				"test-id",
-				"agent-calendar",
+			const result = await executeGws(makeParams({ service: "gmail" }), "test-id", {
+				agentId: "agent-calendar",
 				scopes,
-			);
+			});
 			expect(result.success).toBe(true);
 			expect(mockExeca).toHaveBeenCalled();
 		});
@@ -253,12 +257,10 @@ describe("executeGws", () => {
 					denyServices: ["gmail"],
 				},
 			};
-			const result = await executeGws(
-				makeParams({ service: "gmail" }),
-				"test-id",
-				"agent-research",
+			const result = await executeGws(makeParams({ service: "gmail" }), "test-id", {
+				agentId: "agent-research",
 				scopes,
-			);
+			});
 			expect(result.success).toBe(true);
 			expect(mockExeca).toHaveBeenCalled();
 		});
@@ -270,12 +272,9 @@ describe("executeGws", () => {
 					denyServices: ["gmail"],
 				},
 			};
-			const result = await executeGws(
-				makeParams({ service: "gmail" }),
-				"test-id",
-				undefined,
+			const result = await executeGws(makeParams({ service: "gmail" }), "test-id", {
 				scopes,
-			);
+			});
 			expect(result.success).toBe(true);
 			expect(mockExeca).toHaveBeenCalled();
 		});
@@ -423,6 +422,58 @@ describe("executeGws", () => {
 			);
 			// warn mode: not blocked, but flagged in logs
 			expect(result.success).toBe(true);
+		});
+	});
+
+	describe("vault token injection", () => {
+		it("sets GOOGLE_WORKSPACE_CLI_TOKEN when vault provides token", async () => {
+			let capturedToken: string | undefined;
+			mockExeca.mockImplementation(
+				(_cmd: string, _args: string[], opts: { env: Record<string, string> }) => {
+					capturedToken = opts.env.GOOGLE_WORKSPACE_CLI_TOKEN;
+					return Promise.resolve({ exitCode: 0, stdout: "{}", stderr: "" });
+				},
+			);
+			mockGetGwsAccessToken.mockResolvedValue("test-token");
+			const mockVault = {} as unknown as import("@sentinel/crypto").CredentialVault;
+
+			await executeGws(makeParams(), "test-id", { vault: mockVault });
+
+			expect(mockGetGwsAccessToken).toHaveBeenCalledWith(mockVault);
+			expect(capturedToken).toBe("test-token");
+		});
+
+		it("falls back to keyring when vault token fails (local dev)", async () => {
+			delete process.env.SENTINEL_DOCKER;
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+			mockGetGwsAccessToken.mockRejectedValue(new Error("vault error"));
+			const mockVault = {} as unknown as import("@sentinel/crypto").CredentialVault;
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+			await executeGws(makeParams(), "test-id", { vault: mockVault });
+
+			expect(consoleSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Vault token injection failed"),
+			);
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Falling back to keyring auth"));
+			expect(mockExeca).toHaveBeenCalled();
+			consoleSpy.mockRestore();
+			warnSpy.mockRestore();
+		});
+
+		it("fails fast in Docker when vault token fails", async () => {
+			process.env.SENTINEL_DOCKER = "true";
+			mockGetGwsAccessToken.mockRejectedValue(new Error("vault error"));
+			const mockVault = {} as unknown as import("@sentinel/crypto").CredentialVault;
+			const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+			const result = await executeGws(makeParams(), "test-id", { vault: mockVault });
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("GWS authentication failed");
+			expect(mockExeca).not.toHaveBeenCalled();
+			consoleSpy.mockRestore();
 		});
 	});
 });

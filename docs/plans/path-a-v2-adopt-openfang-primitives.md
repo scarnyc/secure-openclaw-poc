@@ -199,6 +199,12 @@ OpenClaw Agent ← completion signal ← reviews PR
 - Sentinel forwards to the real MCP server after applying: scope restrictions, credential filtering, PII scrubbing, content moderation, audit logging
 - Same pattern as the existing LLM proxy but for MCP tools
 
+**C. Claude Code Auto Mode**
+- Enable auto-mode for all Claude Code projects.
+- Enable (user-level): `claude --enable-auto-mode` opts in per session, no settings.json change needed
+- PreToolUse hook for fatal git commands `git-guardrails.sh` covers most of these patterns
+- org-wide disable (if needed): macOS managed settings path noted as fallback
+
 | Task | What It Does | LOE |
 |------|-------------|-----|
 | `POST /classify` endpoint | Accepts tool name + input from any source (OpenClaw or Claude Code), returns decision, logs to audit | 3 hr |

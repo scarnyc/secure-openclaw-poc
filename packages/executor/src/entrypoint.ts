@@ -20,10 +20,9 @@ try {
 const config = Object.freeze(structuredClone(validated));
 
 const auditLogger = new AuditLogger(config.auditLogPath);
-const registry = createToolRegistry(config.allowedRoots, config.gwsAgentScopes);
 
 // SENTINEL: Open vault for Buffer-based credential injection (G1 fix).
-// Falls back gracefully — LLM proxy uses process.env when vault is unavailable.
+// Falls back gracefully — LLM proxy and GWS tool use process.env when vault is unavailable.
 let vault: CredentialVault | undefined;
 const vaultPassword = process.env.SENTINEL_VAULT_PASSWORD;
 if (vaultPassword && config.vaultPath) {
@@ -37,6 +36,11 @@ if (vaultPassword && config.vaultPath) {
 	}
 }
 
+const registry = createToolRegistry({
+	allowedRoots: config.allowedRoots,
+	gwsScopes: config.gwsAgentScopes,
+	vault,
+});
 const app = createApp(config, auditLogger, registry, vault);
 
 const port = config.executor.port;

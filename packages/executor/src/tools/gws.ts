@@ -1,3 +1,4 @@
+import type { CredentialVault } from "@sentinel/crypto";
 import {
 	containsCredential,
 	GMAIL_SEND_PATTERNS,
@@ -9,6 +10,7 @@ import { execa } from "execa";
 import { moderateEmail, scanOutboundEmail } from "../moderation/email-scanner.js";
 import { getModerationMode } from "../moderation/scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
+import { getGwsAccessToken } from "./gws-auth.js";
 import { validateGwsSendArgs } from "./gws-validation.js";
 
 const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
@@ -39,17 +41,22 @@ export interface GwsParams {
 
 export type { GwsAgentScopes } from "@sentinel/types";
 
+export interface ExecuteGwsContext {
+	agentId?: string;
+	scopes?: GwsAgentScopes;
+	vault?: CredentialVault;
+}
+
 export async function executeGws(
 	params: GwsParams,
 	manifestId: string,
-	agentId?: string,
-	scopes?: GwsAgentScopes,
+	ctx?: ExecuteGwsContext,
 ): Promise<ToolResult> {
 	const start = Date.now();
 
 	// SENTINEL: Per-agent scope restriction (G4)
-	if (agentId && scopes?.[agentId]) {
-		const agentScope = scopes[agentId];
+	if (ctx?.agentId && ctx?.scopes?.[ctx.agentId]) {
+		const agentScope = ctx.scopes[ctx.agentId];
 		if (agentScope.denyServices?.includes(params.service)) {
 			return {
 				manifestId,
@@ -136,13 +143,34 @@ export async function executeGws(
 	}
 
 	try {
+		const env = stripSensitiveEnv(process.env);
+		if (ctx?.vault) {
+			try {
+				const token = await getGwsAccessToken(ctx.vault);
+				env.GOOGLE_WORKSPACE_CLI_TOKEN = token;
+			} catch (error) {
+				const msg = error instanceof Error ? error.message : "Unknown";
+				console.error(`[gws] Vault token injection failed: ${msg}`);
+				if (process.env.SENTINEL_DOCKER === "true") {
+					return {
+						manifestId,
+						success: false,
+						error: "GWS authentication failed — vault token refresh error",
+						duration_ms: Date.now() - start,
+					};
+				}
+				console.warn("[gws] Falling back to keyring auth (local dev only)");
+			}
+		}
+
 		const result = await execa("gws", cliArgs, {
 			timeout: 30_000,
 			killSignal: "SIGKILL",
-			env: stripSensitiveEnv(process.env),
+			env,
 			extendEnv: false,
 			reject: false,
 		});
+		delete env.GOOGLE_WORKSPACE_CLI_TOKEN;
 
 		if (result.exitCode !== 0) {
 			// Never include raw stderr — may contain credentials
