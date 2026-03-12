@@ -210,6 +210,57 @@ describe("@sentinel/crypto-native", () => {
 		}).toThrow(/Failed to spawn/);
 	});
 
+	it.skipIf(!NATIVE_AVAILABLE)(
+		"spawnWithCredential — timeout kills long-running subprocess",
+		() => {
+			const { deriveKeyNative, spawnWithCredential } = nativeModule;
+
+			const vaultData = JSON.parse(readFileSync(vaultPath, "utf8"));
+			const derivedKey = deriveKeyNative(TEST_PASSWORD, vaultData.salt);
+
+			// Use sleep 60 with a 500ms timeout — should throw Timeout error
+			expect(() => {
+				spawnWithCredential(
+					"sleep",
+					["60"],
+					{ PATH: process.env.PATH ?? "/usr/bin" },
+					"UNUSED_CRED",
+					vaultPath,
+					derivedKey,
+					TEST_SERVICE_ID,
+					"apiKey",
+					500, // 500ms timeout
+				);
+			}).toThrow(/timed out/i);
+		},
+	);
+
+	it.skipIf(!NATIVE_AVAILABLE)(
+		"spawnWithCredential — completes before timeout when fast enough",
+		() => {
+			const { deriveKeyNative, spawnWithCredential } = nativeModule;
+
+			const vaultData = JSON.parse(readFileSync(vaultPath, "utf8"));
+			const derivedKey = deriveKeyNative(TEST_PASSWORD, vaultData.salt);
+
+			// Use echo with a generous timeout — should succeed
+			const result = spawnWithCredential(
+				"echo",
+				["timeout-test"],
+				{ PATH: process.env.PATH ?? "/usr/bin" },
+				"UNUSED_CRED",
+				vaultPath,
+				derivedKey,
+				TEST_SERVICE_ID,
+				"apiKey",
+				5000, // 5s timeout — more than enough for echo
+			);
+
+			expect(result.exitCode).toBe(0);
+			expect(result.stdout.trim()).toBe("timeout-test");
+		},
+	);
+
 	it.skipIf(!NATIVE_AVAILABLE)("spawnWithCredential — env vars are passed to subprocess", () => {
 		const { deriveKeyNative, spawnWithCredential } = nativeModule;
 

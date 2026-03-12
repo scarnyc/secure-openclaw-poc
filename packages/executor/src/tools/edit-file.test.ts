@@ -104,6 +104,20 @@ describe("executeEditFile", () => {
 		});
 	});
 
+	it("uses single fd for read-write (no TOCTOU gap)", async () => {
+		process.env.SENTINEL_ALLOWED_ROOTS = tempDir;
+		const path = join(tempDir, "toctou-test.txt");
+		writeFileSync(path, "before edit");
+
+		const result = await executeEditFile(
+			{ path, old_string: "before", new_string: "after" },
+			"test-id",
+		);
+		expect(result.success).toBe(true);
+		// Verify the file was actually modified correctly
+		expect(readFileSync(path, "utf-8")).toBe("after edit");
+	});
+
 	it("denies editing .env files", async () => {
 		const result = await executeEditFile(
 			{ path: "/tmp/.env", old_string: "a", new_string: "b" },

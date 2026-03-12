@@ -49,68 +49,48 @@ export async function executeEditFile(
 		}
 	}
 
-	// SENTINEL: TOCTOU mitigation — O_NOFOLLOW rejects symlinks atomically at open()
+	// SENTINEL: TOCTOU mitigation — single O_RDWR fd eliminates close-reopen race window.
 	// Uses params.path (user-supplied) not guard.resolved, because realpath() already
-	// resolved the symlink — opening guard.resolved would bypass the symlink check.
+	// resolved the symlink — opening guard.resolved would bypass the O_NOFOLLOW check.
 	try {
-		// SENTINEL: TOCTOU mitigation — O_NOFOLLOW rejects symlinks; fstat verifies same inode
-		const readFd = await open(params.path, constants.O_RDONLY | constants.O_NOFOLLOW);
-		let content: string;
-		let readIno: bigint;
+		const fd = await open(params.path, constants.O_RDWR | constants.O_NOFOLLOW);
 		try {
-			const readStat = await readFd.stat({ bigint: true });
-			readIno = readStat.ino;
-			content = await readFd.readFile("utf-8");
-		} finally {
-			await readFd.close();
-		}
+			const content = await fd.readFile("utf-8");
 
-		const occurrences = content.split(params.old_string).length - 1;
-		if (occurrences === 0) {
-			return {
-				manifestId,
-				success: false,
-				error: "old_string not found in file",
-				duration_ms: Date.now() - start,
-			};
-		}
-		if (occurrences > 1) {
-			return {
-				manifestId,
-				success: false,
-				error: `old_string found ${occurrences} times, expected exactly 1`,
-				duration_ms: Date.now() - start,
-			};
-		}
-
-		const updated = content.replace(params.old_string, params.new_string);
-
-		// Write with O_NOFOLLOW + verify inode matches read (TOCTOU defense)
-		const writeFd = await open(
-			params.path,
-			constants.O_WRONLY | constants.O_TRUNC | constants.O_NOFOLLOW,
-		);
-		try {
-			const writeStat = await writeFd.stat({ bigint: true });
-			if (writeStat.ino !== readIno) {
+			const occurrences = content.split(params.old_string).length - 1;
+			if (occurrences === 0) {
 				return {
 					manifestId,
 					success: false,
-					error: "Access denied: file changed between read and write (TOCTOU detected)",
+					error: "old_string not found in file",
 					duration_ms: Date.now() - start,
 				};
 			}
-			await writeFd.writeFile(updated, "utf-8");
-		} finally {
-			await writeFd.close();
-		}
+			if (occurrences > 1) {
+				return {
+					manifestId,
+					success: false,
+					error: `old_string found ${occurrences} times, expected exactly 1`,
+					duration_ms: Date.now() - start,
+				};
+			}
 
-		return {
-			manifestId,
-			success: true,
-			output: `Edited ${params.path}`,
-			duration_ms: Date.now() - start,
-		};
+			const updated = content.replace(params.old_string, params.new_string);
+
+			// Truncate and rewrite on the same fd — no TOCTOU window.
+			// Must write at position 0 since readFile() advanced the offset.
+			await fd.truncate(0);
+			await fd.write(updated, 0, "utf-8");
+
+			return {
+				manifestId,
+				success: true,
+				output: `Edited ${params.path}`,
+				duration_ms: Date.now() - start,
+			};
+		} finally {
+			await fd.close();
+		}
 	} catch (err: unknown) {
 		const code = (err as NodeJS.ErrnoException).code;
 		if (code === "ELOOP" || code === "EMLINK") {

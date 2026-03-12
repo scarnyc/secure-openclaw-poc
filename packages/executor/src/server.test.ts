@@ -405,4 +405,17 @@ describe("body size limits (LOW-17)", () => {
 		// Should not be blocked by body size middleware
 		expect(res.status).not.toBe(413);
 	});
+
+	it("rejects oversized body even without Content-Length header (chunked bypass defense)", async () => {
+		// Create a body larger than 10MB without a Content-Length header
+		const oversizedBody = "x".repeat(11 * 1024 * 1024);
+		const res = await app.request("/execute", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: oversizedBody,
+		});
+		expect(res.status).toBe(413);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toContain("too large");
+	});
 });

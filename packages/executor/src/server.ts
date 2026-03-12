@@ -83,21 +83,34 @@ export function createApp(
 	app.use("*", requestIdMiddleware);
 
 	// SENTINEL: Body size limits (LOW-17) — defense-in-depth against DoS
-	// Checks Content-Length when present; rejects chunked (no CL) in Docker mode
+	// Two-layer enforcement: (1) Content-Length header check for early rejection,
+	// (2) actual body size verification after reading to catch chunked transfer bypass.
+	// Docker mode additionally requires Content-Length to be present.
 	const createBodyLimitMiddleware = (maxBytes: number, label: string) => {
 		return async (c: import("hono").Context, next: import("hono").Next) => {
+			const isBodyMethod =
+				c.req.method === "POST" || c.req.method === "PUT" || c.req.method === "PATCH";
 			const contentLength = c.req.header("content-length");
+
+			// Layer 1: reject early if Content-Length exceeds limit
 			if (contentLength) {
 				if (Number.parseInt(contentLength, 10) > maxBytes) {
 					return c.json({ error: `Request body too large (max ${label})` }, 413);
 				}
-			} else if (
-				process.env.SENTINEL_DOCKER === "true" &&
-				(c.req.method === "POST" || c.req.method === "PUT" || c.req.method === "PATCH")
-			) {
+			} else if (process.env.SENTINEL_DOCKER === "true" && isBodyMethod) {
 				// In Docker: require Content-Length to prevent chunked transfer bypass
 				return c.json({ error: "Content-Length header required" }, 411);
 			}
+
+			// Layer 2: verify actual body size for requests without Content-Length
+			// (catches chunked transfer encoding bypass in non-Docker mode)
+			if (isBodyMethod && !contentLength) {
+				const body = await c.req.raw.clone().arrayBuffer();
+				if (body.byteLength > maxBytes) {
+					return c.json({ error: `Request body too large (max ${label})` }, 413);
+				}
+			}
+
 			return next();
 		};
 	};
