@@ -106,6 +106,7 @@ export function createDelegateHandler(queue: DelegationQueue) {
 		params: Record<string, unknown>,
 		manifestId: string,
 		agentId: string,
+		sessionId: string,
 	): Promise<ToolResult> => {
 		const start = Date.now();
 		const parsed = DelegateCodeParamsSchema.safeParse(params);
@@ -127,7 +128,7 @@ export function createDelegateHandler(queue: DelegationQueue) {
 			maxBudgetUsd: parsed.data.maxBudgetUsd,
 			timeoutSeconds: parsed.data.timeoutSeconds,
 			agentId,
-			sessionId: manifestId,
+			sessionId,
 			status: "pending",
 		};
 

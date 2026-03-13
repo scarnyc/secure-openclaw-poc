@@ -1,7 +1,8 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as p from "@clack/prompts";
 import chalk from "chalk";
 
@@ -146,6 +147,8 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 	// Step 7: Generate SOUL.md from template
 	spin.start("Generating SOUL.md...");
 
+	const __filename = fileURLToPath(import.meta.url);
+	const __dirname = dirname(__filename);
 	const templatePath = resolve(__dirname, "../../packages/openclaw-plugin/templates/SOUL.md");
 	const fallbackTemplatePath = resolve(
 		__dirname,

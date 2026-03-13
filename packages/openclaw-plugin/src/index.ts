@@ -119,18 +119,11 @@ export function createSentinelPlugin(
 			}
 		},
 
-		async afterToolCall(ctx: ToolCallContext, _result: unknown): Promise<void> {
-			// Informational audit post — fire and forget
-			try {
-				await client.classify(
-					ctx.toolName,
-					ctx.params,
-					ctx.session.agentId ?? ctx.runId,
-					ctx.session.sessionId,
-				);
-			} catch {
-				// Non-critical: don't block on audit failures
-			}
+		async afterToolCall(_ctx: ToolCallContext, _result: unknown): Promise<void> {
+			// No-op: audit is already recorded by the /classify call in beforeToolCall.
+			// Previously this called client.classify() again, which double-counted
+			// rate limiter and loop guard state. Kept as a hook point for future
+			// post-execution audit endpoint.
 		},
 
 		sanitizeOutput(output: string): string {

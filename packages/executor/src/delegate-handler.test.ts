@@ -61,6 +61,7 @@ describe("createDelegateHandler", () => {
 			{ task: "Implement feature X" },
 			"manifest-1",
 			"agent-1",
+			"session-1",
 		);
 
 		expect(result.success).toBe(true);
@@ -70,6 +71,7 @@ describe("createDelegateHandler", () => {
 
 		const pending = queue.getPending();
 		expect(pending).toHaveLength(1);
+		expect(pending[0].sessionId).toBe("session-1");
 	});
 
 	it("rejects invalid params", async () => {
@@ -78,6 +80,7 @@ describe("createDelegateHandler", () => {
 			{ task: "" }, // empty task fails min(1)
 			"manifest-1",
 			"agent-1",
+			"session-1",
 		);
 		expect(result.success).toBe(false);
 		expect(result.error).toContain("Invalid delegate.code params");
