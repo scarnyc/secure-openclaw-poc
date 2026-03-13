@@ -18,7 +18,7 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 - [x] Wave 2.2b: Credential Zeroization — useCredential helper, V8 string lifetime minimization (652 tests)
 - [x] Wave 2.2c: Pen Test Fixes — 16 findings across 4 waves (845 tests)
 - [x] Wave 2.3a: OpenClaw + Sentinel Plugin — types, /classify, /filter-output, plugin package, delegate.code, setup CLI (48 tests)
-- [ ] Wave 2.3b: OpenClaw + Sentinel E2E Integration
+- [x] Wave 2.3b: OpenClaw + Sentinel E2E Integration — 8 integration tests (903 tests)
 - [ ] Wave 2.4: LLM Infrastructure (Plano routing, prompt caching, Promptfoo)
 
 ## Quick Commands
@@ -332,6 +332,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 | Wave 2.2b: Credential Zeroization | 652 | #16 | `useCredential()` helper, V8 string lifetime minimization, LLM proxy refactor, GWS vault migration, API deprecation |
 | Wave 2.2c: Pen Test Fixes | 847 | #17 | 16 pen test findings + 16 PR review fixes (3 critical, 8 important, 5 additional): fail-safe limits, HMAC wiring, TOCTOU inode, Ed25519 key separation, body size limits, Rust N-API scaffold |
 | Wave 2.3a: OpenClaw Plugin | 895 | — | `/classify` + `/filter-output` endpoints, `@sentinel/openclaw-plugin` package, `delegate.code` handler, delegation queue, `sentinel setup openclaw` CLI, heartbeat monitor, setup guide |
+| Wave 2.3b: E2E Integration Tests | 903 | — | Plugin ↔ executor pipeline, delegation lifecycle, shared audit sources, fail-closed health monitor, sanitizeOutput |
 
 ### Backlog
 
