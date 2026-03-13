@@ -229,6 +229,50 @@ describe("executeGws", () => {
 		});
 	});
 
+	describe("gwsDefaultDeny fail-closed guards (G5 bypass fixes)", () => {
+		it("denies when gwsDefaultDeny=true and scopes is undefined", async () => {
+			const result = await executeGws(makeParams(), "test-id", {
+				agentId: "some-agent",
+				gwsDefaultDeny: true,
+				// scopes intentionally undefined — most common Docker deployment path
+			});
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("no GWS agent scopes configured");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("denies when gwsDefaultDeny=true and scopes is empty object", async () => {
+			const result = await executeGws(makeParams(), "test-id", {
+				agentId: "some-agent",
+				scopes: {},
+				gwsDefaultDeny: true,
+			});
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("no GWS scope entry configured");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("denies when gwsDefaultDeny=true and agentId is missing", async () => {
+			const result = await executeGws(makeParams(), "test-id", {
+				gwsDefaultDeny: true,
+				// agentId intentionally omitted
+			});
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("agentId required");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("allows when gwsDefaultDeny=false and scopes is undefined (backward compat)", async () => {
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+			const result = await executeGws(makeParams(), "test-id", {
+				agentId: "some-agent",
+				gwsDefaultDeny: false,
+			});
+			expect(result.success).toBe(true);
+			expect(mockExeca).toHaveBeenCalled();
+		});
+	});
+
 	describe("per-agent scope restriction (G4)", () => {
 		it("blocks agent when service is in denyServices", async () => {
 			const scopes: GwsAgentScopes = {
@@ -816,7 +860,6 @@ describe("executeGws", () => {
 					verifyBinary: false,
 					pinnedVersionPolicy: "minimum",
 					vulnerableVersions: [],
-					gwsDefaultDeny: false,
 					allowedOAuthScopes: ["https://www.googleapis.com/auth/gmail.modify"],
 				},
 			});

@@ -57,8 +57,6 @@ export const GwsIntegrityConfigSchema = z.object({
 	vulnerableVersions: z.array(z.string().min(1)).default([]),
 	/** System-wide OAuth scope cap (Google API scope URIs). Unknown services blocked when set. */
 	allowedOAuthScopes: z.array(z.string().min(1)).optional(),
-	/** When true, agents without a GWS scope entry are denied (not just warned). Docker default: true. */
-	gwsDefaultDeny: z.boolean().default(false),
 });
 export type GwsIntegrityConfig = z.infer<typeof GwsIntegrityConfigSchema>;
 
@@ -76,6 +74,8 @@ export const SentinelConfigSchema = z.object({
 	authToken: z.string().min(1).optional(),
 	gwsAgentScopes: GwsAgentScopesSchema.optional(),
 	gwsIntegrity: GwsIntegrityConfigSchema.optional(),
+	/** When true, agents without a GWS scope entry are denied (not just warned). Docker default: true. */
+	gwsDefaultDeny: z.boolean().default(false),
 	llm: z.object({
 		provider: z.literal("anthropic"),
 		model: z.string().min(1),

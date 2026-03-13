@@ -13,15 +13,15 @@ describe("loadConfigFromEnv", () => {
 	});
 
 	it("overrides failMode='open' to 'closed' when SENTINEL_DOCKER=true", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubEnv("SENTINEL_DOCKER", "true");
 		vi.stubEnv("SENTINEL_FAIL_MODE", "open");
 
 		const config = loadConfigFromEnv();
 
 		expect(config.failMode).toBe("closed");
-		expect(warnSpy).toHaveBeenCalledWith(
-			"[openclaw-plugin] failMode='open' overridden to 'closed' in Docker mode",
+		expect(errorSpy).toHaveBeenCalledWith(
+			expect.stringContaining("failMode='open' is not permitted in Docker mode"),
 		);
 	});
 
@@ -34,13 +34,13 @@ describe("loadConfigFromEnv", () => {
 	});
 
 	it("keeps failMode='closed' in Docker mode without override", () => {
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubEnv("SENTINEL_DOCKER", "true");
 		vi.stubEnv("SENTINEL_FAIL_MODE", "closed");
 
 		const config = loadConfigFromEnv();
 
 		expect(config.failMode).toBe("closed");
-		expect(warnSpy).not.toHaveBeenCalled();
+		expect(errorSpy).not.toHaveBeenCalled();
 	});
 });

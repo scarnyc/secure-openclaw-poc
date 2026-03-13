@@ -16,7 +16,9 @@ export function loadConfigFromEnv(): PluginConfig {
 		failMode: process.env.SENTINEL_FAIL_MODE || undefined,
 	});
 	if (process.env.SENTINEL_DOCKER === "true" && config.failMode === "open") {
-		console.warn("[openclaw-plugin] failMode='open' overridden to 'closed' in Docker mode");
+		console.error(
+			"[openclaw-plugin] failMode='open' is not permitted in Docker mode (fail-closed is a security requirement). Forcing failMode='closed'.",
+		);
 		return { ...config, failMode: "closed" };
 	}
 	return config;

@@ -43,6 +43,7 @@ const DEFAULT_CONFIG = {
 	autoApproveReadOps: true,
 	auditLogPath: "",
 	vaultPath: "",
+	gwsDefaultDeny: false,
 	llm: {
 		provider: "anthropic" as const,
 		model: "claude-sonnet-4-20250514",

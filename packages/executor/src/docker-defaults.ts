@@ -31,7 +31,6 @@ export function applyDockerDefaults(
 			verifyBinary: false,
 			pinnedVersionPolicy: "minimum" as const,
 			vulnerableVersions: [],
-			gwsDefaultDeny: false,
 		};
 		const expectedSha256 = env.SENTINEL_GWS_SHA256 ?? base.expectedSha256;
 		if (!expectedSha256) {
@@ -42,20 +41,37 @@ export function applyDockerDefaults(
 				warnings,
 			};
 		}
-		// G5: Docker default-deny for unconfigured agents
 		const gwsIntegrity = {
 			...base,
 			verifyBinary: true,
 			expectedSha256,
-			gwsDefaultDeny: true,
 		};
-		config = { ...config, gwsIntegrity };
+		// G5: Docker default-deny for unconfigured agents (top-level config field)
+		config = { ...config, gwsIntegrity, gwsDefaultDeny: true };
 	}
 
 	// G5: Parse per-agent GWS scopes from env var
 	if (env.SENTINEL_GWS_AGENT_SCOPES) {
-		const parsed = GwsAgentScopesSchema.parse(JSON.parse(env.SENTINEL_GWS_AGENT_SCOPES));
-		config = { ...config, gwsAgentScopes: parsed };
+		let rawJson: unknown;
+		try {
+			rawJson = JSON.parse(env.SENTINEL_GWS_AGENT_SCOPES);
+		} catch {
+			return {
+				config,
+				fatal:
+					"FATAL: SENTINEL_GWS_AGENT_SCOPES contains invalid JSON — check Docker env var syntax",
+				warnings,
+			};
+		}
+		const parseResult = GwsAgentScopesSchema.safeParse(rawJson);
+		if (!parseResult.success) {
+			return {
+				config,
+				fatal: `FATAL: SENTINEL_GWS_AGENT_SCOPES schema validation failed: ${parseResult.error.message}`,
+				warnings,
+			};
+		}
+		config = { ...config, gwsAgentScopes: parseResult.data };
 	}
 
 	// G4: Warn when GWS account email not configured

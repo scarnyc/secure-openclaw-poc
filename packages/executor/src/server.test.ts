@@ -24,6 +24,7 @@ const DEFAULT_CONFIG: SentinelConfig = {
 	autoApproveReadOps: true,
 	auditLogPath: "",
 	vaultPath: "",
+	gwsDefaultDeny: false,
 	llm: { provider: "anthropic", model: "claude-sonnet-4-20250514", maxTokens: 4096 },
 };
 

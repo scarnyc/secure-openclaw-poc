@@ -8,6 +8,7 @@ const BASE_CONFIG: SentinelConfig = {
 	autoApproveReadOps: true,
 	auditLogPath: "/app/data/audit.db",
 	vaultPath: "/app/data/vault.enc",
+	gwsDefaultDeny: false,
 	llm: { provider: "anthropic", model: "claude-sonnet-4-20250514", maxTokens: 4096 },
 };
 
@@ -41,7 +42,6 @@ describe("applyDockerDefaults", () => {
 					pinnedVersionPolicy: "exact" as const,
 					vulnerableVersions: ["0.9.0"],
 					pinnedVersion: "1.0.0",
-					gwsDefaultDeny: false,
 				},
 			};
 			const env: DockerDefaultsEnv = {
@@ -64,7 +64,6 @@ describe("applyDockerDefaults", () => {
 					expectedSha256: sha,
 					pinnedVersionPolicy: "minimum" as const,
 					vulnerableVersions: [],
-					gwsDefaultDeny: false,
 				},
 			};
 			const env: DockerDefaultsEnv = {
@@ -85,7 +84,7 @@ describe("applyDockerDefaults", () => {
 	});
 
 	describe("G5: gwsDefaultDeny in Docker", () => {
-		it("sets gwsDefaultDeny=true in Docker mode", () => {
+		it("sets gwsDefaultDeny=true in Docker mode (top-level config)", () => {
 			const sha = "d".repeat(64);
 			const env: DockerDefaultsEnv = {
 				SENTINEL_DOCKER: "true",
@@ -93,7 +92,29 @@ describe("applyDockerDefaults", () => {
 				SENTINEL_GWS_ACCOUNT_EMAIL: "test@example.com",
 			};
 			const result = applyDockerDefaults(BASE_CONFIG, env);
-			expect(result.config.gwsIntegrity?.gwsDefaultDeny).toBe(true);
+			expect(result.config.gwsDefaultDeny).toBe(true);
+		});
+
+		it("overrides existing gwsDefaultDeny=false to true in Docker mode", () => {
+			const sha = "d".repeat(64);
+			const config = { ...BASE_CONFIG, gwsDefaultDeny: false };
+			const env: DockerDefaultsEnv = {
+				SENTINEL_DOCKER: "true",
+				SENTINEL_GWS_SHA256: sha,
+				SENTINEL_GWS_ACCOUNT_EMAIL: "test@example.com",
+			};
+			const result = applyDockerDefaults(config, env);
+			expect(result.config.gwsDefaultDeny).toBe(true);
+		});
+
+		it("does not set gwsDefaultDeny when not in Docker mode", () => {
+			const env: DockerDefaultsEnv = {
+				SENTINEL_DOCKER: "1",
+				SENTINEL_GWS_ACCOUNT_EMAIL: "test@example.com",
+			};
+			const result = applyDockerDefaults(BASE_CONFIG, env);
+			// SENTINEL_DOCKER="1" is NOT "true" — strict comparison
+			expect(result.config.gwsDefaultDeny).toBe(false);
 		});
 	});
 
@@ -106,6 +127,24 @@ describe("applyDockerDefaults", () => {
 			};
 			const result = applyDockerDefaults(BASE_CONFIG, env);
 			expect(result.config.gwsAgentScopes).toEqual(scopes);
+		});
+
+		it("returns fatal on malformed JSON in SENTINEL_GWS_AGENT_SCOPES", () => {
+			const env: DockerDefaultsEnv = {
+				SENTINEL_GWS_AGENT_SCOPES: '{"agent": invalid}',
+				SENTINEL_GWS_ACCOUNT_EMAIL: "test@example.com",
+			};
+			const result = applyDockerDefaults(BASE_CONFIG, env);
+			expect(result.fatal).toContain("invalid JSON");
+		});
+
+		it("returns fatal on valid JSON but invalid schema in SENTINEL_GWS_AGENT_SCOPES", () => {
+			const env: DockerDefaultsEnv = {
+				SENTINEL_GWS_AGENT_SCOPES: '["not","an","object"]',
+				SENTINEL_GWS_ACCOUNT_EMAIL: "test@example.com",
+			};
+			const result = applyDockerDefaults(BASE_CONFIG, env);
+			expect(result.fatal).toContain("schema validation failed");
 		});
 
 		it("does not set gwsAgentScopes when env var not present", () => {

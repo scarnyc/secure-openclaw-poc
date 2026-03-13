@@ -9,6 +9,7 @@ function makeConfig(overrides: Partial<SentinelConfig> = {}): SentinelConfig {
 		autoApproveReadOps: false,
 		auditLogPath: "/tmp/audit.db",
 		vaultPath: "/tmp/vault.enc",
+		gwsDefaultDeny: false,
 		llm: { provider: "anthropic", model: "claude-sonnet-4-20250514", maxTokens: 4096 },
 		...overrides,
 	};

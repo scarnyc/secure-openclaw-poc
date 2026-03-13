@@ -50,11 +50,12 @@ if (vaultPassword && config.vaultPath) {
 		console.warn(
 			`[sentinel] Vault open failed — falling back to env vars: ${err instanceof Error ? err.message : "Unknown"}`,
 		);
-		// SENTINEL: G7 — FATAL log on vault failure in Docker
+		// SENTINEL: G7 — Vault failure in Docker is fatal (fail-closed)
 		if (process.env.SENTINEL_DOCKER === "true") {
 			console.error(
-				"[sentinel] CRITICAL: Vault open failed in Docker — GWS will be unavailable, LLM proxy uses env vars",
+				"[sentinel] FATAL: Vault open failed in Docker — cannot start without credential vault",
 			);
+			process.exit(1);
 		}
 	}
 }
@@ -64,6 +65,7 @@ const registry = createToolRegistry({
 	gwsScopes: config.gwsAgentScopes,
 	vault,
 	gwsIntegrity: config.gwsIntegrity,
+	gwsDefaultDeny: config.gwsDefaultDeny,
 });
 // SENTINEL: Generate HMAC secret for response signing (B4 pen test finding)
 const { randomBytes: generateHmacBytes } = await import("node:crypto");

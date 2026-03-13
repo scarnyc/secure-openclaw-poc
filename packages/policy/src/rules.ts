@@ -24,6 +24,7 @@ export function getDefaultConfig(): SentinelConfig {
 		autoApproveReadOps: true,
 		auditLogPath: "./data/audit.db",
 		vaultPath: "./data/vault.db",
+		gwsDefaultDeny: false,
 		llm: {
 			provider: "anthropic",
 			model: "claude-sonnet-4-20250514",

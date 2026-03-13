@@ -24,13 +24,11 @@ const DEFAULT_CONFIG: SentinelConfig = {
 	autoApproveReadOps: true,
 	auditLogPath: "",
 	vaultPath: "",
+	gwsDefaultDeny: false,
 	llm: { provider: "anthropic", model: "claude-sonnet-4-20250514", maxTokens: 4096 },
 };
 
-async function postClassify(
-	app: Hono,
-	body: Record<string, unknown>,
-): Promise<Response> {
+async function postClassify(app: Hono, body: Record<string, unknown>): Promise<Response> {
 	return app.request("/classify", {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },

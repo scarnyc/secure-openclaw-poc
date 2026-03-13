@@ -50,6 +50,7 @@ export interface ToolRegistryOptions {
 	gwsScopes?: GwsAgentScopes;
 	vault?: CredentialVault;
 	gwsIntegrity?: GwsIntegrityConfig;
+	gwsDefaultDeny?: boolean;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
@@ -83,7 +84,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
 			scopes: options.gwsScopes,
 			vault: options.vault,
 			integrityConfig: options.gwsIntegrity,
-			gwsDefaultDeny: options.gwsIntegrity?.gwsDefaultDeny,
+			gwsDefaultDeny: options.gwsDefaultDeny,
 		});
 	});
 
