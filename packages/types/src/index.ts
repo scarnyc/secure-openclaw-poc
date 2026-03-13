@@ -37,9 +37,13 @@ export {
 	redactAllCredentials,
 	redactAllCredentialsWithEncoding,
 	redactPII,
+	SENSITIVE_PATH_PATTERN,
+	STRIPPED_ENV_KEYS,
+	STRIPPED_ENV_PREFIXES,
 } from "./credential-patterns.js";
 export {
 	CALENDAR_CREATE_PATTERNS,
+	GMAIL_CONTENT_PATTERNS,
 	GMAIL_SEND_PATTERNS,
 	GWS_DELETE_PATTERNS,
 	GWS_READ_PATTERNS,

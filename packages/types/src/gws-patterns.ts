@@ -13,5 +13,9 @@ export const GWS_DELETE_PATTERNS = /\b(delete|trash|remove)\b/;
 /** Gmail send/draft-send method patterns — classified as write-irreversible */
 export const GMAIL_SEND_PATTERNS = /\b(send|drafts\.send)\b/;
 
+/** Gmail methods that accept email content — used for credential/injection scanning.
+ *  Broader than GMAIL_SEND_PATTERNS (which is only for classification as write-irreversible). */
+export const GMAIL_CONTENT_PATTERNS = /\b(send|drafts\.send|drafts\.create|drafts\.update)\b/;
+
 /** Calendar create/insert method patterns */
 export const CALENDAR_CREATE_PATTERNS = /\b(insert|create)\b/;

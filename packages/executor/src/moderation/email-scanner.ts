@@ -152,38 +152,39 @@ export function scanEmailContent(text: string): EmailScanResult {
 	};
 }
 
+const MAX_EXTRACT_DEPTH = 10;
+
+/** Recursively extract all string values from an object/array tree.
+ *  Depth-limited to prevent DoS from deeply nested input. */
+export function extractAllStringValues(obj: unknown, depth = 0): string[] {
+	if (depth > MAX_EXTRACT_DEPTH) return [];
+	if (typeof obj === "string") return [obj];
+	if (Array.isArray(obj)) return obj.flatMap((v) => extractAllStringValues(v, depth + 1));
+	if (obj !== null && typeof obj === "object") {
+		return Object.values(obj as Record<string, unknown>).flatMap((v) =>
+			extractAllStringValues(v, depth + 1),
+		);
+	}
+	return [];
+}
+
 /**
- * Scan outbound email args (subject, body) for injection patterns.
- * Reuses the same detection patterns as inbound scanning.
+ * Scan outbound email args for injection patterns.
+ * Scans ALL string values recursively (not just subject/body) to prevent
+ * bypass via alternative field names like htmlBody or nested objects.
  */
 export function scanOutboundEmail(args: Record<string, unknown>): EmailScanResult {
-	const allPatterns: string[] = [];
-	let maxSeverity: "low" | "medium" | "high" = "low";
-	const severityOrder = { low: 0, medium: 1, high: 2 };
-
-	const fieldsToScan = ["subject", "body"];
-	for (const field of fieldsToScan) {
-		const value = args[field];
-		if (typeof value !== "string") continue;
-		const result = scanEmailContent(value);
-		if (result.flagged) {
-			for (const p of result.patterns) {
-				if (!allPatterns.includes(p)) allPatterns.push(p);
-			}
-			if (severityOrder[result.severity] > severityOrder[maxSeverity]) {
-				maxSeverity = result.severity;
-			}
-		}
-	}
+	const allStrings = extractAllStringValues(args);
+	const combinedText = allStrings.join("\n");
+	const result = scanEmailContent(combinedText);
 
 	return {
-		flagged: allPatterns.length > 0,
-		patterns: allPatterns,
-		severity: maxSeverity,
-		reason:
-			allPatterns.length > 0
-				? `Outbound email injection detected: ${allPatterns.join(", ")}`
-				: undefined,
+		flagged: result.flagged,
+		patterns: result.patterns,
+		severity: result.severity,
+		reason: result.flagged
+			? `Outbound email injection detected: ${result.patterns.join(", ")}`
+			: undefined,
 	};
 }
 

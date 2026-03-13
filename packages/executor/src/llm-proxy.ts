@@ -1,6 +1,7 @@
 import { type CredentialVault, useCredential } from "@sentinel/crypto";
 import { redactAllCredentialsWithEncoding } from "@sentinel/types";
 import type { Context } from "hono";
+import { createIpPinnedFetch } from "./ip-pinned-fetch.js";
 import { createSseCredentialFilter } from "./sse-credential-filter.js";
 import { checkSsrf, SsrfError } from "./ssrf-guard.js";
 
@@ -98,7 +99,7 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 
 		// SENTINEL: SSRF guard — verify target URL doesn't resolve to private IPs (Phase 1)
-		// DNS rebinding defense: fixed 3-host TLS allowlist mitigates; full IP pinning requires undici Agent (future work)
+		// DNS rebinding defense: SSRF allowlist + IP-pinned fetch via undici Agent when resolved IPs available
 		let ssrfResolvedIps: string[] | undefined;
 		try {
 			const ssrfResult = await checkSsrf(targetUrl);
@@ -150,10 +151,11 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 
 		// Single fetch path for both vault and env var credentials
-		// TODO: IP-pinned fetch via undici Agent using ssrfResolvedIps for DNS rebinding defense
-		void ssrfResolvedIps; // retained for future IP-pinned fetch (requires undici Agent)
+		const pinnedFetch = ssrfResolvedIps?.length
+			? createIpPinnedFetch(ssrfResolvedIps[0], targetHost)
+			: globalThis.fetch;
 		try {
-			const upstreamResponse = await fetch(targetUrl, {
+			const upstreamResponse = await pinnedFetch(targetUrl, {
 				method: c.req.method,
 				headers: forwardHeaders,
 				body: c.req.method !== "GET" ? c.req.raw.body : undefined,

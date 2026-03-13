@@ -4,7 +4,13 @@ import { join } from "node:path";
 import { CredentialVault } from "@sentinel/crypto";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createIpPinnedFetch } from "./ip-pinned-fetch.js";
 import { createLlmProxyHandler } from "./llm-proxy.js";
+
+// Mock IP-pinned fetch — returns globalThis.fetch (evaluated lazily to pick up spies)
+vi.mock("./ip-pinned-fetch.js", () => ({
+	createIpPinnedFetch: vi.fn().mockImplementation(() => globalThis.fetch),
+}));
 
 // Mock SSRF guard — real DNS resolution is unreliable in tests
 vi.mock("./ssrf-guard.js", () => ({
@@ -19,7 +25,15 @@ vi.mock("./ssrf-guard.js", () => ({
 
 let app: Hono;
 
-beforeEach(() => {
+beforeEach(async () => {
+	// Re-establish mocks after restoreAllMocks clears implementations
+	vi.mocked(createIpPinnedFetch).mockImplementation(() => globalThis.fetch);
+	const { checkSsrf } = await import("./ssrf-guard.js");
+	vi.mocked(checkSsrf).mockResolvedValue({
+		resolvedIps: ["1.2.3.4"],
+		hostname: "api.anthropic.com",
+	});
+
 	app = new Hono();
 	app.all("/proxy/llm/*", createLlmProxyHandler());
 	process.env.ANTHROPIC_API_KEY = "sk-ant-test-key";
@@ -462,7 +476,6 @@ describe("LLM Proxy", () => {
 			expect(text).toBe("");
 		});
 
-
 		it("removes stale content-length after body filtering", async () => {
 			const bodyWithCreds = "Response: sk-ant-abc123-leaked-key-in-error";
 			const mockResponse = new Response(bodyWithCreds, {
@@ -487,6 +500,44 @@ describe("LLM Proxy", () => {
 			if (cl) {
 				expect(Number(cl)).toBe(text.length);
 			}
+		});
+	});
+
+	describe("IP-pinned fetch for DNS rebinding defense", () => {
+		it("uses IP-pinned fetch when SSRF resolves IPs", async () => {
+			// Default SSRF mock returns { resolvedIps: ["1.2.3.4"] }
+			// beforeEach re-establishes createIpPinnedFetch mock
+			const mockedCreate = vi.mocked(createIpPinnedFetch);
+
+			const mockResponse = new Response("{}", { status: 200 });
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(mockedCreate).toHaveBeenCalledWith("1.2.3.4", "api.anthropic.com");
+		});
+
+		it("falls back to globalThis.fetch when no resolved IPs", async () => {
+			const { checkSsrf } = await import("./ssrf-guard.js");
+			(checkSsrf as ReturnType<typeof vi.fn>).mockResolvedValueOnce({ resolvedIps: [] });
+
+			const mockedCreate = vi.mocked(createIpPinnedFetch);
+			mockedCreate.mockClear();
+
+			const mockResponse = new Response("{}", { status: 200 });
+			vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+			await app.request("/proxy/llm/v1/messages", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({}),
+			});
+
+			expect(mockedCreate).not.toHaveBeenCalled();
 		});
 	});
 

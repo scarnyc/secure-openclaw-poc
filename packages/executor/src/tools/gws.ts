@@ -1,38 +1,24 @@
 import type { CredentialVault } from "@sentinel/crypto";
 import {
 	containsCredential,
-	GMAIL_SEND_PATTERNS,
+	GMAIL_CONTENT_PATTERNS,
 	GWS_READ_PATTERNS,
 	type GwsAgentScopes,
 	type GwsIntegrityConfig,
 	type ToolResult,
 } from "@sentinel/types";
 import { execa } from "execa";
-import { moderateEmail, scanOutboundEmail } from "../moderation/email-scanner.js";
+import { stripSensitiveEnv } from "../env-utils.js";
+import {
+	extractAllStringValues,
+	moderateEmail,
+	scanOutboundEmail,
+} from "../moderation/email-scanner.js";
 import { getModerationMode } from "../moderation/scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
 import { getGwsAccessToken } from "./gws-auth.js";
 import { ensureGwsIntegrity, isServiceAllowed } from "./gws-integrity.js";
-import { validateGwsSendArgs } from "./gws-validation.js";
-
-const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
-const STRIPPED_ENV_KEYS = new Set([
-	"MOLTBOT_GATEWAY_TOKEN",
-	"CF_ACCESS_AUD",
-	"R2_ACCESS_KEY_ID",
-	"R2_SECRET_ACCESS_KEY",
-	"CF_ACCOUNT_ID",
-]);
-
-function stripSensitiveEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const cleaned: NodeJS.ProcessEnv = {};
-	for (const [key, value] of Object.entries(env)) {
-		if (STRIPPED_ENV_KEYS.has(key)) continue;
-		if (STRIPPED_ENV_PREFIXES.some((p) => key.startsWith(p))) continue;
-		cleaned[key] = value;
-	}
-	return cleaned;
-}
+import { validateGwsArgs } from "./gws-validation.js";
 
 export interface GwsParams {
 	service: string;
@@ -110,7 +96,7 @@ export async function executeGws(
 	}
 
 	if (params.args) {
-		const validation = validateGwsSendArgs(params.service, params.method, params.args);
+		const validation = validateGwsArgs(params.service, params.method, params.args);
 		if (!validation.valid) {
 			return {
 				manifestId,
@@ -122,13 +108,12 @@ export async function executeGws(
 	}
 
 	// SENTINEL: Credential leakage check — block emails containing API keys/tokens/[REDACTED] markers
-	if (params.args && params.service === "gmail" && GMAIL_SEND_PATTERNS.test(params.method)) {
-		GMAIL_SEND_PATTERNS.lastIndex = 0;
+	// Uses GMAIL_CONTENT_PATTERNS to also cover drafts.create/update (not just send)
+	if (params.args && params.service === "gmail" && GMAIL_CONTENT_PATTERNS.test(params.method)) {
 		const mode = getModerationMode();
 		if (mode !== "off") {
-			const subject = typeof params.args.subject === "string" ? params.args.subject : "";
-			const body = typeof params.args.body === "string" ? params.args.body : "";
-			const emailText = `${subject}\n${body}`;
+			const allStrings = extractAllStringValues(params.args);
+			const emailText = allStrings.join("\n");
 			const hasRedacted = /\[REDACTED\]|\[PII_REDACTED\]/.test(emailText);
 
 			if (containsCredential(emailText) || hasRedacted) {
@@ -145,9 +130,8 @@ export async function executeGws(
 		}
 	}
 
-	// Outbound email scanning: check subject/body for injection patterns before send
-	if (params.args && params.service === "gmail" && GMAIL_SEND_PATTERNS.test(params.method)) {
-		GMAIL_SEND_PATTERNS.lastIndex = 0;
+	// Outbound email scanning: check all string values for injection patterns
+	if (params.args && params.service === "gmail" && GMAIL_CONTENT_PATTERNS.test(params.method)) {
 		const mode = getModerationMode();
 		if (mode !== "off") {
 			const scanResult = scanOutboundEmail(params.args);

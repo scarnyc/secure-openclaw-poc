@@ -4,6 +4,9 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 
 ## Current Phase: Phase 2 — Integrations + Real Agents
 
+**Next Steps**:
+1. Create set-up guide for openclaw with sentinel 
+2. Security scan gooogle workspace cli
 **Roadmap**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 **Wave spec**: `docs/superpowers/specs/2026-03-10-phase-2-waves-design.md`
 
