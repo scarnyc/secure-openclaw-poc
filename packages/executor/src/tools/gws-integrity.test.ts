@@ -28,7 +28,7 @@ import {
 const mockExeca = execa as unknown as MockInstance;
 const mockCreateReadStream = createReadStream as unknown as MockInstance;
 
-// SHA-256 of the bytes "gws-binary-content"
+// SHA-256 of empty string — used as a known test hash value
 const KNOWN_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
 
 function mockReadStream(content: string): Readable {
@@ -376,7 +376,7 @@ describe("ensureGwsIntegrity", () => {
 		expect(result.error).toContain("vulnerable");
 	});
 
-	it("adds warning when verifyBinary=false and expectedSha256 not set", async () => {
+	it("no hash warning when verifyBinary=false (intentional opt-out)", async () => {
 		mockExeca.mockImplementation((_cmd: string, args?: string[]) => {
 			if (args?.[0] === "--version") {
 				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
@@ -384,10 +384,23 @@ describe("ensureGwsIntegrity", () => {
 			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
 		});
 
-		const result = await ensureGwsIntegrity(GwsIntegrityConfigSchema.parse({}));
+		const config = GwsIntegrityConfigSchema.parse({ verifyBinary: false });
+		const result = await ensureGwsIntegrity(config);
 		expect(result.ok).toBe(true);
-		expect(result.warnings.length).toBeGreaterThan(0);
-		expect(result.warnings.some((w) => w.includes("hash verification disabled"))).toBe(true);
+		expect(result.warnings.some((w) => w.includes("hash verification"))).toBe(false);
+	});
+
+	it("adds warning when verifyBinary not set (no config)", async () => {
+		mockExeca.mockImplementation((_cmd: string, args?: string[]) => {
+			if (args?.[0] === "--version") {
+				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
+			}
+			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
+		});
+
+		const result = await ensureGwsIntegrity();
+		expect(result.ok).toBe(true);
+		expect(result.warnings.some((w) => w.includes("hash verification not configured"))).toBe(true);
 	});
 
 	it("passes all checks when config matches actual binary", async () => {
@@ -408,5 +421,105 @@ describe("ensureGwsIntegrity", () => {
 		expect(result.ok).toBe(true);
 		expect(result.version).toBe("2.0.0");
 		expect(result.binaryPath).toBe("/usr/local/bin/gws");
+	});
+
+	it("fails when verifyBinary=true but expectedSha256 not set (fail-closed)", async () => {
+		mockExeca.mockImplementation((_cmd: string, args?: string[]) => {
+			if (args?.[0] === "--version") {
+				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
+			}
+			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
+		});
+
+		const config = GwsIntegrityConfigSchema.parse({
+			verifyBinary: true,
+			// no expectedSha256
+		});
+
+		const result = await ensureGwsIntegrity(config);
+		expect(result.ok).toBe(false);
+		expect(result.error).toContain("expectedSha256 is not set");
+	});
+
+	it("verifies hash BEFORE executing --version (TOCTOU mitigation)", async () => {
+		const callOrder: string[] = [];
+		mockExeca.mockImplementation((_cmd: string, args?: string[]) => {
+			if (args?.[0] === "--version") {
+				callOrder.push("version");
+				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
+			}
+			callOrder.push("which");
+			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
+		});
+		mockCreateReadStream.mockImplementation(() => {
+			callOrder.push("hash");
+			return mockReadStream("binary-content");
+		});
+
+		const config = GwsIntegrityConfigSchema.parse({
+			verifyBinary: true,
+			expectedSha256: "0".repeat(64), // will mismatch, but we just check ordering
+		});
+
+		await ensureGwsIntegrity(config);
+
+		// hash must come before version
+		const hashIdx = callOrder.indexOf("hash");
+		const versionIdx = callOrder.indexOf("version");
+		expect(hashIdx).toBeGreaterThan(-1);
+		// version should not have been called since hash mismatched
+		// but even if it did, hash must come first
+		if (versionIdx !== -1) {
+			expect(hashIdx).toBeLessThan(versionIdx);
+		}
+	});
+
+	it("caches separately for different configs", async () => {
+		mockExeca.mockImplementation((_cmd: string, args?: string[]) => {
+			if (args?.[0] === "--version") {
+				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
+			}
+			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
+		});
+
+		const config1 = GwsIntegrityConfigSchema.parse({ pinnedVersion: "1.0.0" });
+		const config2 = GwsIntegrityConfigSchema.parse({ pinnedVersion: "2.0.0" });
+
+		const result1 = await ensureGwsIntegrity(config1);
+		expect(result1.ok).toBe(true);
+
+		const result2 = await ensureGwsIntegrity(config2);
+		// config2 requires version >= 2.0.0 but binary is 1.0.0 → should fail
+		expect(result2.ok).toBe(false);
+		expect(result2.error).toContain("Version");
+	});
+
+	it("strips sensitive env vars from subprocess calls", async () => {
+		mockExeca.mockImplementation((_cmd: string, _args?: string[], opts?: Record<string, unknown>) => {
+			// Verify extendEnv is false
+			expect(opts?.extendEnv).toBe(false);
+			// Verify env doesn't contain SENTINEL_ or ANTHROPIC_ prefixed vars
+			const env = opts?.env as NodeJS.ProcessEnv | undefined;
+			if (env) {
+				for (const key of Object.keys(env)) {
+					expect(key).not.toMatch(/^(SENTINEL_|ANTHROPIC_|OPENAI_|GEMINI_)/);
+				}
+			}
+			if (_args?.[0] === "--version") {
+				return Promise.resolve({ exitCode: 0, stdout: "1.0.0" });
+			}
+			return Promise.resolve({ exitCode: 0, stdout: "/usr/local/bin/gws" });
+		});
+
+		// Set some sensitive env vars that should be stripped
+		process.env.SENTINEL_TEST_KEY = "should-be-stripped";
+		process.env.ANTHROPIC_API_KEY = "should-be-stripped";
+
+		try {
+			await ensureGwsIntegrity();
+		} finally {
+			delete process.env.SENTINEL_TEST_KEY;
+			delete process.env.ANTHROPIC_API_KEY;
+		}
 	});
 });

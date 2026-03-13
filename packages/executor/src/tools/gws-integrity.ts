@@ -3,10 +3,38 @@ import { createReadStream } from "node:fs";
 import type { GwsIntegrityConfig } from "@sentinel/types";
 import { execa } from "execa";
 
+// --- Env stripping (consistent with gws.ts) ---
+
+const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
+const STRIPPED_ENV_KEYS = new Set([
+	"MOLTBOT_GATEWAY_TOKEN",
+	"CF_ACCESS_AUD",
+	"R2_ACCESS_KEY_ID",
+	"R2_SECRET_ACCESS_KEY",
+	"CF_ACCOUNT_ID",
+	"GOOGLE_WORKSPACE_CLI_TOKEN",
+]);
+
+function stripSensitiveEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+	const cleaned: NodeJS.ProcessEnv = {};
+	for (const [key, value] of Object.entries(env)) {
+		if (STRIPPED_ENV_KEYS.has(key)) continue;
+		if (STRIPPED_ENV_PREFIXES.some((p) => key.startsWith(p))) continue;
+		cleaned[key] = value;
+	}
+	return cleaned;
+}
+
+const cleanEnv = stripSensitiveEnv(process.env);
+
 // --- Binary resolution ---
 
 export async function resolveGwsBinary(): Promise<string> {
-	const result = await execa("which", ["gws"], { reject: false });
+	const result = await execa("which", ["gws"], {
+		reject: false,
+		env: cleanEnv,
+		extendEnv: false,
+	});
 	if (result.exitCode !== 0) {
 		throw new Error("gws binary not found on PATH");
 	}
@@ -31,6 +59,8 @@ export async function getGwsVersion(binaryPath: string): Promise<string> {
 	const result = await execa(binaryPath, ["--version"], {
 		timeout: 5_000,
 		reject: false,
+		env: cleanEnv,
+		extendEnv: false,
 	});
 	if (result.exitCode !== 0) {
 		throw new Error("gws --version failed");
@@ -132,10 +162,17 @@ export interface IntegrityResult {
 	error?: string;
 }
 
-let integrityCache: Promise<IntegrityResult> | null = null;
+// Cache keyed by stable JSON of config — prevents cross-agent contamination
+// when different agents have different integrity configs
+const integrityCache = new Map<string, Promise<IntegrityResult>>();
+
+function configCacheKey(config?: GwsIntegrityConfig): string {
+	if (!config) return "__no_config__";
+	return JSON.stringify(config);
+}
 
 export function resetIntegrityCache(): void {
-	integrityCache = null;
+	integrityCache.clear();
 }
 
 async function performIntegrityCheck(
@@ -157,7 +194,47 @@ async function performIntegrityCheck(
 		};
 	}
 
-	// Step 2: Get version
+	// Step 2: Binary hash verification BEFORE executing the binary (TOCTOU mitigation)
+	// Hash must be verified before any execution (--version) to prevent a compromised
+	// binary from running arbitrary code during the version check.
+	if (config?.verifyBinary) {
+		if (!config.expectedSha256) {
+			// Fail-closed: verifyBinary=true without expectedSha256 is a config error
+			return {
+				ok: false,
+				binaryPath,
+				version: "",
+				warnings,
+				error: "verifyBinary is true but expectedSha256 is not set — cannot verify binary integrity",
+			};
+		}
+		try {
+			const actualHash = await computeBinaryHash(binaryPath);
+			if (actualHash !== config.expectedSha256) {
+				return {
+					ok: false,
+					binaryPath,
+					version: "",
+					warnings,
+					error: "Binary hash mismatch — gws binary may have been tampered with or updated",
+				};
+			}
+		} catch (err) {
+			return {
+				ok: false,
+				binaryPath,
+				version: "",
+				warnings,
+				error: `Failed to compute binary hash: ${err instanceof Error ? err.message : "unknown error"}`,
+			};
+		}
+	} else if (config?.verifyBinary === false) {
+		// Intentional opt-out — no warning (user explicitly chose not to verify)
+	} else {
+		warnings.push("Binary hash verification not configured — set verifyBinary and expectedSha256 to enable");
+	}
+
+	// Step 3: Get version (only after binary is verified)
 	let version: string;
 	try {
 		version = await getGwsVersion(binaryPath);
@@ -169,32 +246,6 @@ async function performIntegrityCheck(
 			warnings,
 			error: `Failed to determine gws version: ${err instanceof Error ? err.message : "unknown error"}`,
 		};
-	}
-
-	// Step 3: Binary hash verification (if enabled)
-	if (config?.verifyBinary && config.expectedSha256) {
-		try {
-			const actualHash = await computeBinaryHash(binaryPath);
-			if (actualHash !== config.expectedSha256) {
-				return {
-					ok: false,
-					binaryPath,
-					version,
-					warnings,
-					error: "Binary hash mismatch — gws binary may have been tampered with or updated",
-				};
-			}
-		} catch (err) {
-			return {
-				ok: false,
-				binaryPath,
-				version,
-				warnings,
-				error: `Failed to compute binary hash: ${err instanceof Error ? err.message : "unknown error"}`,
-			};
-		}
-	} else {
-		warnings.push("Binary hash verification disabled — set verifyBinary and expectedSha256 to enable");
 	}
 
 	// Step 4: Version pinning
@@ -232,15 +283,17 @@ async function performIntegrityCheck(
 export async function ensureGwsIntegrity(
 	config?: GwsIntegrityConfig,
 ): Promise<IntegrityResult> {
-	if (integrityCache) return integrityCache;
+	const key = configCacheKey(config);
+	const cached = integrityCache.get(key);
+	if (cached) return cached;
 
 	const check = performIntegrityCheck(config);
 
 	// Only cache successful results — failed checks can be retried
-	integrityCache = check;
+	integrityCache.set(key, check);
 	check.then((result) => {
 		if (!result.ok) {
-			integrityCache = null;
+			integrityCache.delete(key);
 		}
 	});
 
