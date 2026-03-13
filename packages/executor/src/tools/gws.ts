@@ -4,6 +4,7 @@ import {
 	GMAIL_SEND_PATTERNS,
 	GWS_READ_PATTERNS,
 	type GwsAgentScopes,
+	type GwsIntegrityConfig,
 	type ToolResult,
 } from "@sentinel/types";
 import { execa } from "execa";
@@ -11,6 +12,7 @@ import { moderateEmail, scanOutboundEmail } from "../moderation/email-scanner.js
 import { getModerationMode } from "../moderation/scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
 import { getGwsAccessToken } from "./gws-auth.js";
+import { ensureGwsIntegrity, isServiceAllowed } from "./gws-integrity.js";
 import { validateGwsSendArgs } from "./gws-validation.js";
 
 const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
@@ -45,6 +47,7 @@ export interface ExecuteGwsContext {
 	agentId?: string;
 	scopes?: GwsAgentScopes;
 	vault?: CredentialVault;
+	integrityConfig?: GwsIntegrityConfig;
 }
 
 export async function executeGws(
@@ -70,6 +73,37 @@ export async function executeGws(
 				manifestId,
 				success: false,
 				error: `Agent not authorized for service: ${params.service}`,
+				duration_ms: Date.now() - start,
+			};
+		}
+	}
+
+	// SENTINEL: Binary integrity verification — hash, version pin, CVE check
+	const integrity = await ensureGwsIntegrity(ctx?.integrityConfig);
+	if (!integrity.ok) {
+		const isDocker = process.env.SENTINEL_DOCKER === "true";
+		if (isDocker) {
+			return {
+				manifestId,
+				success: false,
+				error: `GWS binary integrity check failed: ${integrity.error}`,
+				duration_ms: Date.now() - start,
+			};
+		}
+		// Local dev: warn but allow (except hash check was skipped — just a warning)
+		console.warn(`[gws:integrity] ${integrity.error}`);
+	}
+	for (const warning of integrity.warnings) {
+		console.warn(`[gws:integrity] ${warning}`);
+	}
+
+	// SENTINEL: System-wide OAuth scope cap (above per-agent scopes)
+	if (ctx?.integrityConfig?.allowedOAuthScopes) {
+		if (!isServiceAllowed(params.service, ctx.integrityConfig.allowedOAuthScopes)) {
+			return {
+				manifestId,
+				success: false,
+				error: `Service ${params.service} not in system-wide allowed OAuth scopes`,
 				duration_ms: Date.now() - start,
 			};
 		}

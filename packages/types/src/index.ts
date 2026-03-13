@@ -20,6 +20,8 @@ export {
 	GwsAgentScopeSchema,
 	type GwsAgentScopes,
 	GwsAgentScopesSchema,
+	type GwsIntegrityConfig,
+	GwsIntegrityConfigSchema,
 	type McpServerConfig,
 	McpServerConfigSchema,
 	type SentinelConfig,

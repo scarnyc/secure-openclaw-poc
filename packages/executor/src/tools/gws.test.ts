@@ -10,11 +10,19 @@ vi.mock("./gws-auth.js", () => ({
 	getGwsAccessToken: vi.fn(),
 }));
 
+vi.mock("./gws-integrity.js", () => ({
+	ensureGwsIntegrity: vi.fn().mockResolvedValue({ ok: true, binaryPath: "/usr/local/bin/gws", version: "1.0.0", warnings: [] }),
+	isServiceAllowed: vi.fn().mockReturnValue(true),
+}));
+
 import { execa } from "execa";
 import { getGwsAccessToken } from "./gws-auth.js";
+import { ensureGwsIntegrity, isServiceAllowed } from "./gws-integrity.js";
 
 const mockExeca = execa as unknown as MockInstance;
 const mockGetGwsAccessToken = getGwsAccessToken as unknown as MockInstance;
+const mockEnsureGwsIntegrity = ensureGwsIntegrity as unknown as MockInstance;
+const mockIsServiceAllowed = isServiceAllowed as unknown as MockInstance;
 
 function makeParams(overrides: Partial<GwsParams> = {}): GwsParams {
 	return {
@@ -27,6 +35,14 @@ function makeParams(overrides: Partial<GwsParams> = {}): GwsParams {
 describe("executeGws", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		// Default: integrity checks pass (backward compat for all existing tests)
+		mockEnsureGwsIntegrity.mockResolvedValue({
+			ok: true,
+			binaryPath: "/usr/local/bin/gws",
+			version: "1.0.0",
+			warnings: [],
+		});
+		mockIsServiceAllowed.mockReturnValue(true);
 	});
 
 	afterEach(() => {
@@ -495,6 +511,68 @@ describe("executeGws", () => {
 			expect(result.error).toContain("GWS authentication failed");
 			expect(mockExeca).not.toHaveBeenCalled();
 			consoleSpy.mockRestore();
+		});
+	});
+
+	describe("integrity gate integration", () => {
+		it("blocks execution in Docker when integrity check fails", async () => {
+			process.env.SENTINEL_DOCKER = "true";
+			mockEnsureGwsIntegrity.mockResolvedValue({
+				ok: false,
+				binaryPath: "",
+				version: "",
+				warnings: [],
+				error: "gws binary not found on PATH",
+			});
+
+			const result = await executeGws(makeParams(), "test-id");
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("integrity check failed");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("warns but allows in local dev when integrity check fails", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			mockEnsureGwsIntegrity.mockResolvedValue({
+				ok: false,
+				binaryPath: "/usr/local/bin/gws",
+				version: "1.0.0",
+				warnings: [],
+				error: "Version check failed",
+			});
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+
+			const result = await executeGws(makeParams(), "test-id");
+
+			expect(result.success).toBe(true);
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[gws:integrity]"));
+			warnSpy.mockRestore();
+		});
+
+		it("blocks when service not in system-wide allowed OAuth scopes", async () => {
+			mockIsServiceAllowed.mockReturnValue(false);
+
+			const result = await executeGws(makeParams({ service: "admin" }), "test-id", {
+				integrityConfig: {
+					verifyBinary: false,
+					pinnedVersionPolicy: "minimum",
+					vulnerableVersions: [],
+					allowedOAuthScopes: ["https://www.googleapis.com/auth/gmail.modify"],
+				},
+			});
+
+			expect(result.success).toBe(false);
+			expect(result.error).toContain("not in system-wide allowed OAuth scopes");
+			expect(mockExeca).not.toHaveBeenCalled();
+		});
+
+		it("allows when no system-wide scope cap configured", async () => {
+			mockExeca.mockResolvedValue({ exitCode: 0, stdout: "{}", stderr: "" });
+
+			const result = await executeGws(makeParams(), "test-id");
+
+			expect(result.success).toBe(true);
 		});
 	});
 });
