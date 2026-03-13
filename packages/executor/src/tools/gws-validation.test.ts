@@ -7,9 +7,17 @@ vi.mock("execa", () => ({
 	execa: vi.fn(),
 }));
 
+vi.mock("./gws-integrity.js", () => ({
+	ensureGwsIntegrity: vi.fn(),
+	isServiceAllowed: vi.fn(),
+}));
+
 import { execa } from "execa";
+import { ensureGwsIntegrity, isServiceAllowed } from "./gws-integrity.js";
 
 const mockExeca = execa as unknown as MockInstance;
+const mockEnsureGwsIntegrity = ensureGwsIntegrity as unknown as MockInstance;
+const mockIsServiceAllowed = isServiceAllowed as unknown as MockInstance;
 
 describe("validateGwsSendArgs", () => {
 	it("valid gmail send args pass", () => {
@@ -118,6 +126,13 @@ describe("validateGwsSendArgs", () => {
 describe("executeGws with validation", () => {
 	beforeEach(() => {
 		vi.resetAllMocks();
+		mockEnsureGwsIntegrity.mockResolvedValue({
+			ok: true,
+			binaryPath: "/usr/local/bin/gws",
+			version: "1.0.0",
+			warnings: [],
+		});
+		mockIsServiceAllowed.mockReturnValue(true);
 	});
 
 	it("returns failure without calling execa when args are invalid", async () => {

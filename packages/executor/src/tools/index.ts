@@ -1,5 +1,5 @@
 import type { CredentialVault } from "@sentinel/crypto";
-import type { GwsAgentScopes } from "@sentinel/types";
+import type { GwsAgentScopes, GwsIntegrityConfig } from "@sentinel/types";
 import { z } from "zod";
 import { executeBash } from "./bash.js";
 import { executeEditFile } from "./edit-file.js";
@@ -49,6 +49,7 @@ export interface ToolRegistryOptions {
 	allowedRoots?: readonly string[];
 	gwsScopes?: GwsAgentScopes;
 	vault?: CredentialVault;
+	gwsIntegrity?: GwsIntegrityConfig;
 }
 
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
@@ -81,6 +82,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
 			agentId,
 			scopes: options.gwsScopes,
 			vault: options.vault,
+			integrityConfig: options.gwsIntegrity,
 		});
 	});
 

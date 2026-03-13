@@ -136,6 +136,18 @@ importers:
         specifier: ^3.0.0
         version: 3.2.4(@types/node@25.3.3)(tsx@4.21.0)
 
+  packages/crypto-native:
+    devDependencies:
+      '@napi-rs/cli':
+        specifier: ^2.18.0
+        version: 2.18.4
+      '@sentinel/crypto':
+        specifier: workspace:*
+        version: link:../crypto
+      vitest:
+        specifier: ^3.0.0
+        version: 3.2.4(@types/node@25.3.3)(tsx@4.21.0)
+
   packages/executor:
     dependencies:
       '@hono/node-server':
@@ -646,6 +658,11 @@ packages:
 
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
+
+  '@napi-rs/cli@2.18.4':
+    resolution: {integrity: sha512-SgJeA4df9DE2iAEpr3M2H0OKl/yjtg1BnRI5/JyowS71tUWhrfSu2LT0V3vlHET+g1hBVlrO60PmEXwUEKp8Mg==}
+    engines: {node: '>= 10'}
+    hasBin: true
 
   '@protobufjs/aspromise@1.1.2':
     resolution: {integrity: sha512-j+gKExEuLmKwvz3OgROXtrJ2UG2x8Ch2YZUxahh+s1F2HZ+wAceUNLkvy6zKCPVRkU++ZWQrdxsUeQXmcg4uoQ==}
@@ -2067,6 +2084,8 @@ snapshots:
     dependencies:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
+
+  '@napi-rs/cli@2.18.4': {}
 
   '@protobufjs/aspromise@1.1.2': {}
 
