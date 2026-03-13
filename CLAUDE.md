@@ -7,7 +7,6 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 **Next Steps**:
 1. Context budget enforcement: per-result 30% cap, global 75% cap
 2. Tool recursion depth limiting: max depth 5 for agent-to-agent calls
-3. Create setup guide for OpenClaw with Sentinel
 **Roadmap**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 **Wave spec**: `docs/superpowers/specs/2026-03-10-phase-2-waves-design.md`
 
@@ -60,7 +59,7 @@ pnpm install
 ```bash
 pnpm install
 pnpm typecheck   # Verify TypeScript
-pnpm test         # Run all tests (845+)
+pnpm test         # Run all tests (1100+)
 ```
 
 ### Running locally
