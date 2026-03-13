@@ -232,3 +232,20 @@ export function redactPII(text: string): string {
 export function redactAll(text: string): string {
 	return redactPII(redactAllCredentialsWithEncoding(text));
 }
+
+// ── Sensitive file patterns ──────────────────────────────────────────
+// Detects file paths targeting secrets, keys, and config files.
+// Used by GWS drive validation and other path-aware security checks.
+export const SENSITIVE_PATH_PATTERN =
+	/\.(env|key|pem|p12|pfx)\b|vault\.enc|\.git\/(config|credentials)/;
+
+// ── Environment variable stripping patterns ──────────────────────────
+// Prefixes and specific keys to strip from subprocess environments.
+export const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
+export const STRIPPED_ENV_KEYS = new Set([
+	"MOLTBOT_GATEWAY_TOKEN",
+	"CF_ACCESS_AUD",
+	"R2_ACCESS_KEY_ID",
+	"R2_SECRET_ACCESS_KEY",
+	"CF_ACCOUNT_ID",
+]);

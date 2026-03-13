@@ -18,26 +18,7 @@ import { getModerationMode } from "../moderation/scanner.js";
 import { truncateBashOutput } from "../output-truncation.js";
 import { getGwsAccessToken } from "./gws-auth.js";
 import { ensureGwsIntegrity, isServiceAllowed } from "./gws-integrity.js";
-import { validateGwsSendArgs } from "./gws-validation.js";
-
-const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
-const STRIPPED_ENV_KEYS = new Set([
-	"MOLTBOT_GATEWAY_TOKEN",
-	"CF_ACCESS_AUD",
-	"R2_ACCESS_KEY_ID",
-	"R2_SECRET_ACCESS_KEY",
-	"CF_ACCOUNT_ID",
-]);
-
-function stripSensitiveEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-	const cleaned: NodeJS.ProcessEnv = {};
-	for (const [key, value] of Object.entries(env)) {
-		if (STRIPPED_ENV_KEYS.has(key)) continue;
-		if (STRIPPED_ENV_PREFIXES.some((p) => key.startsWith(p))) continue;
-		cleaned[key] = value;
-	}
-	return cleaned;
-}
+import { validateGwsArgs } from "./gws-validation.js";
 
 export interface GwsParams {
 	service: string;
@@ -128,9 +109,7 @@ export async function executeGws(
 
 	// SENTINEL: Credential leakage check — block emails containing API keys/tokens/[REDACTED] markers
 	// Uses GMAIL_CONTENT_PATTERNS to also cover drafts.create/update (not just send)
-	GMAIL_CONTENT_PATTERNS.lastIndex = 0;
 	if (params.args && params.service === "gmail" && GMAIL_CONTENT_PATTERNS.test(params.method)) {
-		GMAIL_CONTENT_PATTERNS.lastIndex = 0;
 		const mode = getModerationMode();
 		if (mode !== "off") {
 			const allStrings = extractAllStringValues(params.args);
@@ -152,9 +131,7 @@ export async function executeGws(
 	}
 
 	// Outbound email scanning: check all string values for injection patterns
-	GMAIL_CONTENT_PATTERNS.lastIndex = 0;
 	if (params.args && params.service === "gmail" && GMAIL_CONTENT_PATTERNS.test(params.method)) {
-		GMAIL_CONTENT_PATTERNS.lastIndex = 0;
 		const mode = getModerationMode();
 		if (mode !== "off") {
 			const scanResult = scanOutboundEmail(params.args);

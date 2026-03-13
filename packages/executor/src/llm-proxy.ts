@@ -99,7 +99,7 @@ export function createLlmProxyHandler(vault?: CredentialVault): (c: Context) => 
 		}
 
 		// SENTINEL: SSRF guard — verify target URL doesn't resolve to private IPs (Phase 1)
-		// DNS rebinding defense: fixed 3-host TLS allowlist mitigates; full IP pinning requires undici Agent (future work)
+		// DNS rebinding defense: SSRF allowlist + IP-pinned fetch via undici Agent when resolved IPs available
 		let ssrfResolvedIps: string[] | undefined;
 		try {
 			const ssrfResult = await checkSsrf(targetUrl);

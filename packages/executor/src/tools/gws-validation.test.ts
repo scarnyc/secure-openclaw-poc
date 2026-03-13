@@ -6,7 +6,7 @@ import {
 	validateGwsCalendarArgs,
 	validateGwsDriveArgs,
 	validateGwsGenericArgs,
-	validateGwsSendArgs,
+	validateGwsEmailContentArgs,
 } from "./gws-validation.js";
 
 // Mock execa for the executeGws integration test
@@ -26,9 +26,9 @@ const mockExeca = execa as unknown as MockInstance;
 const mockEnsureGwsIntegrity = ensureGwsIntegrity as unknown as MockInstance;
 const mockIsServiceAllowed = isServiceAllowed as unknown as MockInstance;
 
-describe("validateGwsSendArgs", () => {
+describe("validateGwsEmailContentArgs", () => {
 	it("valid gmail send args pass", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: ["alice@example.com"],
 			subject: "Hello",
 			body: "Test body",
@@ -38,7 +38,7 @@ describe("validateGwsSendArgs", () => {
 	});
 
 	it("missing `to` rejects", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			subject: "Hello",
 		});
 		expect(result.valid).toBe(false);
@@ -46,22 +46,22 @@ describe("validateGwsSendArgs", () => {
 	});
 
 	it("invalid email format rejects", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: ["not-an-email", "@missing.com"],
 			subject: "Hello",
 		});
 		expect(result.valid).toBe(false);
 		expect(result.errors).toEqual(
 			expect.arrayContaining([
-				expect.stringContaining("not-an-email"),
-				expect.stringContaining("@missing.com"),
+				expect.stringContaining("invalid email"),
+				expect.stringContaining("invalid email"),
 			]),
 		);
 	});
 
 	it(">50 recipients in `to` rejects", () => {
 		const emails = Array.from({ length: 51 }, (_, i) => `user${i}@example.com`);
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: emails,
 			subject: "Hello",
 		});
@@ -75,7 +75,7 @@ describe("validateGwsSendArgs", () => {
 		const toEmails = Array.from({ length: 40 }, (_, i) => `to${i}@example.com`);
 		const ccEmails = Array.from({ length: 35 }, (_, i) => `cc${i}@example.com`);
 		const bccEmails = Array.from({ length: 30 }, (_, i) => `bcc${i}@example.com`);
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: toEmails,
 			cc: ccEmails,
 			bcc: bccEmails,
@@ -88,7 +88,7 @@ describe("validateGwsSendArgs", () => {
 	});
 
 	it("CRLF in subject rejects", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: ["alice@example.com"],
 			subject: "Hello\r\nBCC: evil@example.com",
 		});
@@ -97,7 +97,7 @@ describe("validateGwsSendArgs", () => {
 	});
 
 	it("subject >998 chars rejects", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: ["alice@example.com"],
 			subject: "x".repeat(999),
 		});
@@ -106,20 +106,20 @@ describe("validateGwsSendArgs", () => {
 	});
 
 	it("non-gmail service passes without validation", () => {
-		const result = validateGwsSendArgs("drive", "files.create", {});
+		const result = validateGwsEmailContentArgs("drive", "files.create", {});
 		expect(result.valid).toBe(true);
 		expect(result.errors).toHaveLength(0);
 	});
 
 	it("non-send gmail method passes without validation", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.list", {});
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.list", {});
 		expect(result.valid).toBe(true);
 		expect(result.errors).toHaveLength(0);
 	});
 
 	describe("raw MIME blocking", () => {
 		it("args.raw on users.messages.send is rejected", () => {
-			const result = validateGwsSendArgs("gmail", "users.messages.send", {
+			const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 				raw: btoa("From: me\r\nTo: you\r\n\r\nHello"),
 				to: ["alice@example.com"],
 				subject: "Hello",
@@ -131,7 +131,7 @@ describe("validateGwsSendArgs", () => {
 		});
 
 		it("args.raw on drafts.create is rejected", () => {
-			const result = validateGwsSendArgs("gmail", "drafts.create", {
+			const result = validateGwsEmailContentArgs("gmail", "drafts.create", {
 				raw: btoa("From: me\r\n\r\nDraft content"),
 				subject: "Draft",
 			});
@@ -142,7 +142,7 @@ describe("validateGwsSendArgs", () => {
 		});
 
 		it("args.raw alongside valid to/subject is still rejected", () => {
-			const result = validateGwsSendArgs("gmail", "users.messages.send", {
+			const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 				raw: "anything",
 				to: ["alice@example.com"],
 				subject: "Hello",
@@ -155,14 +155,14 @@ describe("validateGwsSendArgs", () => {
 		});
 
 		it("non-gmail method with raw passes (not gmail-scoped)", () => {
-			const result = validateGwsSendArgs("drive", "files.create", { raw: "data" });
+			const result = validateGwsEmailContentArgs("drive", "files.create", { raw: "data" });
 			expect(result.valid).toBe(true);
 		});
 	});
 
 	describe("draft validation", () => {
 		it("drafts.create without to but with subject passes", () => {
-			const result = validateGwsSendArgs("gmail", "drafts.create", {
+			const result = validateGwsEmailContentArgs("gmail", "drafts.create", {
 				subject: "Draft subject",
 				body: "Draft body",
 			});
@@ -171,17 +171,42 @@ describe("validateGwsSendArgs", () => {
 		});
 
 		it("drafts.update with valid fields passes", () => {
-			const result = validateGwsSendArgs("gmail", "drafts.update", {
+			const result = validateGwsEmailContentArgs("gmail", "drafts.update", {
 				subject: "Updated subject",
 				body: "Updated body",
 			});
 			expect(result.valid).toBe(true);
 			expect(result.errors).toHaveLength(0);
 		});
+
+		it("drafts.create without subject passes (subject optional for drafts)", () => {
+			const result = validateGwsEmailContentArgs("gmail", "drafts.create", {
+				body: "Draft body without subject",
+			});
+			expect(result.valid).toBe(true);
+			expect(result.errors).toHaveLength(0);
+		});
+
+		it("drafts.update without subject passes", () => {
+			const result = validateGwsEmailContentArgs("gmail", "drafts.update", {
+				body: "Updated body",
+			});
+			expect(result.valid).toBe(true);
+			expect(result.errors).toHaveLength(0);
+		});
+
+		it("send without subject rejects", () => {
+			const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
+				to: ["alice@example.com"],
+				body: "No subject",
+			});
+			expect(result.valid).toBe(false);
+			expect(result.errors).toEqual(expect.arrayContaining([expect.stringContaining("subject")]));
+		});
 	});
 
 	it("valid args with cc + bcc pass", () => {
-		const result = validateGwsSendArgs("gmail", "users.messages.send", {
+		const result = validateGwsEmailContentArgs("gmail", "users.messages.send", {
 			to: ["alice@example.com"],
 			cc: ["bob@example.com"],
 			bcc: ["carol@example.com"],
@@ -244,6 +269,26 @@ describe("validateGwsDriveArgs", () => {
 	it("passes normal file paths", () => {
 		const result = validateGwsDriveArgs("files.get", { name: "report.pdf", folderId: "abc123" });
 		expect(result.valid).toBe(true);
+	});
+
+	it("rejects nested path traversal (recursive scanning)", () => {
+		const result = validateGwsDriveArgs("files.copy", {
+			resource: { metadata: { filePath: "../../.env" } },
+		});
+		expect(result.valid).toBe(false);
+		expect(result.errors).toEqual(
+			expect.arrayContaining([expect.stringContaining("traversal")]),
+		);
+	});
+
+	it("rejects nested sensitive file targeting", () => {
+		const result = validateGwsDriveArgs("files.copy", {
+			resource: { name: "server.pem" },
+		});
+		expect(result.valid).toBe(false);
+		expect(result.errors).toEqual(
+			expect.arrayContaining([expect.stringContaining("sensitive")]),
+		);
 	});
 });
 

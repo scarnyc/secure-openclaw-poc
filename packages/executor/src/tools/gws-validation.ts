@@ -1,4 +1,5 @@
-import { GMAIL_CONTENT_PATTERNS, GMAIL_SEND_PATTERNS } from "@sentinel/types";
+import { GMAIL_CONTENT_PATTERNS, GMAIL_SEND_PATTERNS, SENSITIVE_PATH_PATTERN } from "@sentinel/types";
+import { extractAllStringValues } from "../moderation/email-scanner.js";
 
 const EMAIL_REGEX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const MAX_RECIPIENTS_PER_FIELD = 50;
@@ -21,19 +22,18 @@ function validateEmailArray(value: unknown, fieldName: string, errors: string[])
 	}
 	for (const email of value) {
 		if (typeof email !== "string" || !EMAIL_REGEX.test(email)) {
-			errors.push(`${fieldName} contains invalid email: ${String(email)}`);
+			errors.push(`${fieldName} contains an invalid email address`);
 		}
 	}
 	return value as string[];
 }
 
-export function validateGwsSendArgs(
+export function validateGwsEmailContentArgs(
 	service: string,
 	method: string,
 	args: Record<string, unknown>,
 ): ValidationResult {
 	// Non-gmail or non-content methods: passthrough
-	GMAIL_CONTENT_PATTERNS.lastIndex = 0;
 	if (service !== "gmail" || !GMAIL_CONTENT_PATTERNS.test(method)) {
 		return { valid: true, errors: [] };
 	}
@@ -47,7 +47,6 @@ export function validateGwsSendArgs(
 	}
 
 	// Determine if this is a send-class method (requires `to`) or draft-class (to is optional)
-	GMAIL_SEND_PATTERNS.lastIndex = 0;
 	const isSendMethod = GMAIL_SEND_PATTERNS.test(method);
 
 	// to: required for send, optional for drafts
@@ -64,15 +63,28 @@ export function validateGwsSendArgs(
 		errors.push(`Total recipients (${totalRecipients}) exceeds maximum of ${MAX_TOTAL_RECIPIENTS}`);
 	}
 
-	// subject: required, max 998 chars, no CRLF
-	if (!args.subject || typeof args.subject !== "string") {
-		errors.push("subject is required and must be a string");
-	} else {
-		if (args.subject.length > MAX_SUBJECT_LENGTH) {
-			errors.push(`subject exceeds maximum length of ${MAX_SUBJECT_LENGTH} characters`);
+	// subject: required for send operations, optional for drafts
+	if (isSendMethod) {
+		if (!args.subject || typeof args.subject !== "string") {
+			errors.push("subject is required and must be a string");
+		} else {
+			if (args.subject.length > MAX_SUBJECT_LENGTH) {
+				errors.push(`subject exceeds maximum length of ${MAX_SUBJECT_LENGTH} characters`);
+			}
+			if (/[\r\n]/.test(args.subject)) {
+				errors.push("subject must not contain CR or LF characters");
+			}
 		}
-		if (/[\r\n]/.test(args.subject)) {
-			errors.push("subject must not contain CR or LF characters");
+	} else if (args.subject !== undefined) {
+		if (typeof args.subject !== "string") {
+			errors.push("subject must be a string");
+		} else {
+			if (args.subject.length > MAX_SUBJECT_LENGTH) {
+				errors.push(`subject exceeds maximum length of ${MAX_SUBJECT_LENGTH} characters`);
+			}
+			if (/[\r\n]/.test(args.subject)) {
+				errors.push("subject must not contain CR or LF characters");
+			}
 		}
 	}
 
@@ -91,8 +103,7 @@ export const ADMIN_READ_METHODS = new Set([
 	"groups.get",
 	"orgunits.list",
 ]);
-export const SENSITIVE_PATH_PATTERN =
-	/\.(env|key|pem|p12|pfx)\b|vault\.enc|\.git\/(config|credentials)/;
+// SENSITIVE_PATH_PATTERN imported from @sentinel/types (single source of truth)
 
 function checkDepthAndSize(obj: unknown, errors: string[], depth = 0): void {
 	if (depth > MAX_ARG_DEPTH) {
@@ -131,15 +142,13 @@ export function validateGwsDriveArgs(
 	args: Record<string, unknown>,
 ): ValidationResult {
 	const errors: string[] = [];
-	// Check all string values for path traversal and sensitive file targeting
-	for (const value of Object.values(args)) {
-		if (typeof value === "string") {
-			if (value.includes("..")) {
-				errors.push("Path traversal (..) is not allowed in drive arguments");
-			}
-			if (SENSITIVE_PATH_PATTERN.test(value)) {
-				errors.push("Targeting sensitive files is not allowed");
-			}
+	// SENTINEL: Recursively extract all string values to catch nested path traversal (consistent with email scanning)
+	for (const value of extractAllStringValues(args)) {
+		if (value.includes("..")) {
+			errors.push("Path traversal (..) is not allowed in drive arguments");
+		}
+		if (SENSITIVE_PATH_PATTERN.test(value)) {
+			errors.push("Targeting sensitive files is not allowed");
 		}
 	}
 	return { valid: errors.length === 0, errors };
@@ -165,7 +174,7 @@ export function validateGwsCalendarArgs(
 						? (attendee as Record<string, unknown>).email
 						: undefined;
 			if (typeof email !== "string" || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
-				errors.push(`Invalid attendee email: ${String(email ?? attendee)}`);
+				errors.push("Invalid attendee email format");
 			}
 		}
 	}
@@ -176,7 +185,7 @@ export function validateGwsAdminArgs(method: string): ValidationResult {
 	if (!ADMIN_READ_METHODS.has(method)) {
 		return {
 			valid: false,
-			errors: [`Admin method "${method}" is not allowed — only read-only methods permitted`],
+			errors: ["Admin method is not allowed — only read-only methods permitted"],
 		};
 	}
 	return { valid: true, errors: [] };
@@ -196,7 +205,7 @@ export function validateGwsArgs(
 	// 2. Service-specific validation
 	switch (service) {
 		case "gmail": {
-			const gmail = validateGwsSendArgs(service, method, args);
+			const gmail = validateGwsEmailContentArgs(service, method, args);
 			allErrors.push(...gmail.errors);
 			break;
 		}

@@ -1,11 +1,6 @@
-export const STRIPPED_ENV_PREFIXES = ["SENTINEL_", "ANTHROPIC_", "OPENAI_", "GEMINI_"];
-export const STRIPPED_ENV_KEYS = new Set([
-	"MOLTBOT_GATEWAY_TOKEN",
-	"CF_ACCESS_AUD",
-	"R2_ACCESS_KEY_ID",
-	"R2_SECRET_ACCESS_KEY",
-	"CF_ACCOUNT_ID",
-]);
+import { STRIPPED_ENV_KEYS, STRIPPED_ENV_PREFIXES } from "@sentinel/types";
+
+export { STRIPPED_ENV_KEYS, STRIPPED_ENV_PREFIXES };
 
 export function stripSensitiveEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
 	const cleaned: NodeJS.ProcessEnv = {};
