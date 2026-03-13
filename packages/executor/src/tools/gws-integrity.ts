@@ -263,11 +263,16 @@ export async function ensureGwsIntegrity(config?: GwsIntegrityConfig): Promise<I
 
 	// Only cache successful results — failed checks can be retried
 	integrityCache.set(key, check);
-	check.then((result) => {
-		if (!result.ok) {
+	check
+		.then((result) => {
+			if (!result.ok) {
+				integrityCache.delete(key);
+			}
+		})
+		.catch(() => {
+			// S2 fix: clean up cache on rejection (e.g., unhandled throws in performIntegrityCheck)
 			integrityCache.delete(key);
-		}
-	});
+		});
 
 	return check;
 }

@@ -2,12 +2,12 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AuditLogger } from "@sentinel/audit";
-import type { ActionManifest, SentinelConfig, ToolResult } from "@sentinel/types";
+import type { ActionManifest, AuditEntry, SentinelConfig, ToolResult } from "@sentinel/types";
 import type { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./server.js";
 import { createToolRegistry } from "./tools/index.js";
-import type { ToolRegistry } from "./tools/registry.js";
+import { ToolRegistry } from "./tools/registry.js";
 
 let tempDir: string;
 let auditLogger: AuditLogger;
@@ -382,11 +382,11 @@ describe("body size limits (LOW-17)", () => {
 		expect(body.error).toContain("too large");
 	});
 
-	it("rejects /proxy/llm/* with Content-Length > 100MB", async () => {
+	it("rejects /proxy/llm/* with Content-Length > 25MB (I5/I7 fix)", async () => {
 		const res = await app.request("/proxy/llm/v1/messages", {
 			method: "POST",
 			headers: {
-				"Content-Length": "110000000",
+				"Content-Length": String(26 * 1024 * 1024),
 				"Content-Type": "application/json",
 			},
 			body: "{}",
@@ -394,6 +394,21 @@ describe("body size limits (LOW-17)", () => {
 		expect(res.status).toBe(413);
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toContain("too large");
+	});
+
+	it("allows /proxy/llm/* with Content-Length under 25MB", async () => {
+		// 24MB should be within the limit — test won't actually send 24MB,
+		// but header check alone determines rejection
+		const res = await app.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: {
+				"Content-Length": String(24 * 1024 * 1024),
+				"Content-Type": "application/json",
+			},
+			body: "{}",
+		});
+		// Should NOT be rejected by body size middleware
+		expect(res.status).not.toBe(413);
 	});
 
 	it("allows normal-sized /execute requests", async () => {
@@ -417,5 +432,41 @@ describe("body size limits (LOW-17)", () => {
 		expect(res.status).toBe(413);
 		const body = (await res.json()) as { error: string };
 		expect(body.error).toContain("too large");
+	});
+});
+
+describe("M7: unhandled exception audit logging (I2)", () => {
+	it("logs best-effort audit entry when handler throws", async () => {
+		// Create a custom registry with a tool that throws to escape handleExecute
+		const throwingRegistry = new ToolRegistry();
+		throwingRegistry.registerBuiltin("crash-tool", async () => {
+			throw new Error("Unhandled crash");
+		});
+		// Configure crash-tool as "read" + autoApproveReadOps so it bypasses confirmation
+		const crashConfig: SentinelConfig = {
+			...DEFAULT_CONFIG,
+			autoApproveReadOps: true,
+			classifications: [
+				...DEFAULT_CONFIG.classifications,
+				{ tool: "crash-tool", defaultCategory: "read" as const },
+			],
+		};
+		const crashApp = createApp(crashConfig, auditLogger, throwingRegistry);
+
+		const consoleSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+		const manifest = makeManifest({ tool: "crash-tool", parameters: {} });
+		const res = await postExecute(crashApp, manifest);
+
+		expect(res.status).toBe(500);
+		const body = (await res.json()) as { error: string };
+		expect(body.error).toBe("Internal execution error");
+
+		// Verify audit trail contains a failure entry
+		const entries = auditLogger.query({});
+		const failureEntries = entries.filter((e: AuditEntry) => e.result === "failure");
+		expect(failureEntries.length).toBeGreaterThanOrEqual(1);
+
+		consoleSpy.mockRestore();
 	});
 });

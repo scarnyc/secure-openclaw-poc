@@ -95,8 +95,10 @@ export function createLlmProxyHandler(
 						result: "blocked_by_policy",
 						duration_ms: Date.now() - proxyStart,
 					});
-				} catch {
-					/* audit best-effort */
+				} catch (auditErr) {
+					console.error(
+						`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+					);
 				}
 			}
 			return c.json({ error: `Blocked: ${targetHost} is not an allowed LLM host` }, 403);
@@ -147,8 +149,10 @@ export function createLlmProxyHandler(
 							result: "blocked_by_policy",
 							duration_ms: Date.now() - proxyStart,
 						});
-					} catch {
-						/* audit best-effort */
+					} catch (auditErr) {
+						console.error(
+							`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+						);
 					}
 				}
 				return c.json({ error: "Blocked: SSRF protection" }, 403);
@@ -194,8 +198,10 @@ export function createLlmProxyHandler(
 									result: "failure",
 									duration_ms: Date.now() - proxyStart,
 								});
-							} catch {
-								/* audit best-effort */
+							} catch (auditErr) {
+								console.error(
+									`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+								);
 							}
 						}
 						return c.json({ error: "LLM proxy credential error" }, 500);
@@ -249,6 +255,29 @@ export function createLlmProxyHandler(
 				responseHeaders.delete("content-length");
 				responseHeaders.delete("transfer-encoding");
 
+				// SENTINEL: M8 — Audit streaming LLM proxy requests (C1 fix)
+				if (auditLogger) {
+					try {
+						auditLogger.log({
+							id: crypto.randomUUID(),
+							timestamp: new Date().toISOString(),
+							manifestId: crypto.randomUUID(),
+							sessionId: "system",
+							agentId: "agent",
+							tool: "llm_proxy",
+							category: "read",
+							decision: "auto_approve",
+							parameters_summary: `${c.req.method} ${targetHost}${downstreamPath} [streaming]`,
+							result: upstreamResponse.status < 400 ? "success" : "failure",
+							duration_ms: Date.now() - proxyStart,
+						});
+					} catch (auditErr) {
+						console.error(
+							`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+						);
+					}
+				}
+
 				const filteredStream = upstreamResponse.body
 					? upstreamResponse.body.pipeThrough(createSseCredentialFilter())
 					: null;
@@ -285,8 +314,10 @@ export function createLlmProxyHandler(
 						result: upstreamResponse.status < 400 ? "success" : "failure",
 						duration_ms: duration,
 					});
-				} catch {
-					/* audit best-effort */
+				} catch (auditErr) {
+					console.error(
+						`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+					);
 				}
 			}
 
@@ -316,8 +347,10 @@ export function createLlmProxyHandler(
 						result: "failure",
 						duration_ms: Date.now() - proxyStart,
 					});
-				} catch {
-					/* audit best-effort */
+				} catch (auditErr) {
+					console.error(
+						`[llm-proxy] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+					);
 				}
 			}
 			return c.json({ error: "LLM proxy upstream error" }, 502);

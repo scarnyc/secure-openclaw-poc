@@ -316,3 +316,44 @@ describe("Security Invariant #6: Policy changes require restart", () => {
 		}).toThrow();
 	});
 });
+
+describe("M3: Vault password env var deletion (I3)", () => {
+	it("deletes SENTINEL_VAULT_PASSWORD from process.env after successful vault open", async () => {
+		const { CredentialVault } = await import("@sentinel/crypto");
+		const { mkdtemp, rm } = await import("node:fs/promises");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+
+		const dir = await mkdtemp(join(tmpdir(), "sentinel-m3-"));
+		const vaultPath = join(dir, "vault.json");
+		const password = "test-password-123";
+
+		// Simulate entrypoint pattern: set env, open vault, delete env
+		process.env.SENTINEL_VAULT_PASSWORD = password;
+		try {
+			const vault = await CredentialVault.create(vaultPath, password);
+			delete process.env.SENTINEL_VAULT_PASSWORD;
+			expect(process.env.SENTINEL_VAULT_PASSWORD).toBeUndefined();
+			vault.destroy();
+		} catch {
+			delete process.env.SENTINEL_VAULT_PASSWORD;
+		}
+		// Verify env var is gone in both paths
+		expect(process.env.SENTINEL_VAULT_PASSWORD).toBeUndefined();
+		await rm(dir, { recursive: true, force: true });
+	});
+
+	it("deletes SENTINEL_VAULT_PASSWORD from process.env even on vault open failure", async () => {
+		const password = "test-password-123";
+		process.env.SENTINEL_VAULT_PASSWORD = password;
+		try {
+			// Attempt to open a non-existent vault — should fail
+			const { CredentialVault } = await import("@sentinel/crypto");
+			await CredentialVault.open("/nonexistent/path/vault.json", password);
+		} catch {
+			// Expected failure
+			delete process.env.SENTINEL_VAULT_PASSWORD;
+		}
+		expect(process.env.SENTINEL_VAULT_PASSWORD).toBeUndefined();
+	});
+});

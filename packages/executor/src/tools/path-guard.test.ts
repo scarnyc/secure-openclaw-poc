@@ -106,34 +106,11 @@ describe("isPathAllowed", () => {
 	});
 });
 
-describe("Docker mode fail-closed (L1)", () => {
+// I8 fix: Duplicate Docker mode tests removed — already covered above in "isPathAllowed" describe block.
+// Unique test retained below:
+describe("Docker mode with configured roots (L1)", () => {
 	afterEach(() => {
 		delete process.env.SENTINEL_DOCKER;
-		delete process.env.SENTINEL_ALLOWED_ROOTS;
-	});
-
-	it("warns but allows in Docker mode when no roots configured", async () => {
-		process.env.SENTINEL_DOCKER = "true";
-		delete process.env.SENTINEL_ALLOWED_ROOTS;
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const result = await isPathAllowed("/etc/passwd", undefined);
-		expect(result.allowed).toBe(true);
-		expect(warnSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Docker mode with no allowed roots"),
-		);
-		warnSpy.mockRestore();
-	});
-
-	it("warns but allows in Docker mode when empty roots provided", async () => {
-		process.env.SENTINEL_DOCKER = "true";
-		delete process.env.SENTINEL_ALLOWED_ROOTS;
-		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-		const result = await isPathAllowed("/etc/passwd", []);
-		expect(result.allowed).toBe(true);
-		expect(warnSpy).toHaveBeenCalledWith(
-			expect.stringContaining("Docker mode with no allowed roots"),
-		);
-		warnSpy.mockRestore();
 	});
 
 	it("allows paths in Docker mode when roots ARE configured", async () => {

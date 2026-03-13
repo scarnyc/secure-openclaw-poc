@@ -382,6 +382,37 @@ describe("bash deny-list: sqlite3 direct database access (M5)", () => {
 		const result = await executeBash({ command: 'echo "use sqlite3"' }, "test-id");
 		expect(result.error ?? "").not.toContain("database access");
 	});
+
+	// I4 fix: sqlite3 bypass vectors
+	it("denies env sqlite3 (prefix bypass)", async () => {
+		const result = await executeBash({ command: "env sqlite3 audit.db .dump" }, "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("database access denied");
+	});
+
+	it("denies command sqlite3 (prefix bypass)", async () => {
+		const result = await executeBash({ command: "command sqlite3 audit.db" }, "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("database access denied");
+	});
+
+	it("denies ./sqlite3 (relative path bypass)", async () => {
+		const result = await executeBash({ command: "./sqlite3 audit.db" }, "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("database access denied");
+	});
+
+	it("denies $(sqlite3 ...) subshell bypass", async () => {
+		const result = await executeBash({ command: 'echo $(sqlite3 audit.db ".dump")' }, "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("database access denied");
+	});
+
+	it("denies backtick sqlite3 bypass", async () => {
+		const result = await executeBash({ command: "echo `sqlite3 audit.db .dump`" }, "test-id");
+		expect(result.success).toBe(false);
+		expect(result.error).toContain("database access denied");
+	});
 });
 
 describe("bash cwd path whitelist (M1)", () => {

@@ -686,6 +686,39 @@ describe("LLM Proxy audit logging (M8)", () => {
 
 		expect(res.status).toBe(200);
 	});
+
+	it("logs audit entry for streaming (SSE) responses (C1 fix)", async () => {
+		const mockAuditLogger = { log: vi.fn() };
+		const auditApp = new Hono();
+		auditApp.all(
+			"/proxy/llm/*",
+			createLlmProxyHandler(
+				undefined,
+				mockAuditLogger as unknown as import("@sentinel/audit").AuditLogger,
+			),
+		);
+
+		const sseBody = 'data: {"type":"content_block_delta"}\n\ndata: {"type":"message_stop"}\n\n';
+		const mockResponse = new Response(sseBody, {
+			status: 200,
+			headers: { "content-type": "text/event-stream" },
+		});
+		vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(mockResponse);
+
+		const res = await auditApp.request("/proxy/llm/v1/messages", {
+			method: "POST",
+			headers: { "Content-Type": "application/json" },
+			body: JSON.stringify({}),
+		});
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get("content-type")).toBe("text/event-stream");
+		expect(mockAuditLogger.log).toHaveBeenCalledOnce();
+		const entry = mockAuditLogger.log.mock.calls[0][0];
+		expect(entry.tool).toBe("llm_proxy");
+		expect(entry.result).toBe("success");
+		expect(entry.parameters_summary).toContain("[streaming]");
+	});
 });
 
 describe("LLM Proxy vault error message suppression (L5)", () => {

@@ -115,7 +115,8 @@ export function createApp(
 		};
 	};
 	app.use("/execute", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
-	app.use("/proxy/llm/*", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
+	// SENTINEL: I7 — 25MB for LLM proxy to accommodate large context windows (200K+ tokens)
+	app.use("/proxy/llm/*", createBodyLimitMiddleware(25 * 1024 * 1024, "25MB"));
 
 	// SENTINEL: HMAC-SHA256 response signing for integrity verification (B4)
 	// Placed before routes so all responses (including /health) get signed
@@ -194,8 +195,10 @@ export function createApp(
 					result: "failure",
 					duration_ms: 0,
 				});
-			} catch {
-				/* audit best-effort — don't mask original error */
+			} catch (auditErr) {
+				console.error(
+					`[execute] Audit logging failed: ${auditErr instanceof Error ? auditErr.message : "Unknown"}`,
+				);
 			}
 			console.error(
 				`[execute] Unhandled error: ${error instanceof Error ? error.message : "Unknown"}`,
