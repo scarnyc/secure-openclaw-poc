@@ -226,6 +226,9 @@ Four categories with graduated confirmation: `read` (auto-approve configurable),
 - Pre-execute: scans request parameters; post-execute: scans tool output
 - `enforce`: blocked content returns generic error; `warn`: logged but not blocked
 
+### Input Validation
+- **All HTTP endpoints must Zod-validate** — every POST body AND path params through Zod schemas before use. Security review catches missing validation as HIGH severity.
+
 ### Testing
 - **Vitest** with V8 coverage; tests colocated as `*.test.ts` next to source
 - **Security tests** are mandatory — each invariant above has a dedicated test
@@ -309,6 +312,8 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **Hono test client Content-Length** — Hono's test client doesn't always set Content-Length; body size middleware requiring it must be gated behind `SENTINEL_DOCKER=true`
 - **AuditLogger auto-key-gen** — constructor calls `loadOrGenerateSigningKey()`, so ALL entries are signed; tests must use `logger.getSigningPublicKey()` not random keys for verification
 - **Parallel wave contamination** — when multiple waves touch the same file, restore from main first (`git checkout <main-sha> -- <file>`) then apply only the current wave's fix
+- **Types `dist/` uses `tsc --build`** — tsup DTS fails with composite project refs; `pnpm build` in types only produces ESM bundle. For full dist (with per-file .js + .d.ts), run `tsc --build` from `packages/types/`. Delete `tsconfig.tsbuildinfo` for clean rebuild.
+- **Executor-client HTTP tests need sandbox disabled** — `node:http` createServer with `.listen()` triggers sandbox EPERM; use `dangerouslyDisableSandbox: true` for tests that start local HTTP servers
 
 
 ## Build Progress
