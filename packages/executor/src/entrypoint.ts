@@ -10,6 +10,9 @@ import { createToolRegistry } from "./tools/index.js";
 const mutableConfig = getDefaultConfig();
 mutableConfig.auditLogPath = process.env.SENTINEL_AUDIT_PATH ?? "/app/data/audit.db";
 mutableConfig.vaultPath = process.env.SENTINEL_VAULT_PATH ?? "/app/data/vault.enc";
+if (process.env.SENTINEL_AUTH_TOKEN) {
+	mutableConfig.authToken = process.env.SENTINEL_AUTH_TOKEN;
+}
 
 let validated: import("@sentinel/types").SentinelConfig;
 try {

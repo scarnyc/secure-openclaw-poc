@@ -1,17 +1,25 @@
 import type { AuditLogger } from "@sentinel/audit";
 import type { CredentialVault } from "@sentinel/crypto";
 import { LoopGuard, RateLimiter } from "@sentinel/policy";
-import type { ActionManifest, AgentCard, PolicyDecision, SentinelConfig } from "@sentinel/types";
+import type {
+	ActionManifest,
+	AgentCard,
+	EgressBinding,
+	PolicyDecision,
+	SentinelConfig,
+} from "@sentinel/types";
 import { redactAll } from "@sentinel/types";
 import { Hono } from "hono";
 import { z } from "zod";
 import { createAuthMiddleware } from "./auth-middleware.js";
+import { type ClassifyGuards, handleClassify } from "./classify-endpoint.js";
+import { handleConfirmOnly } from "./confirm-endpoint.js";
+import type { DelegationQueue } from "./delegate-handler.js";
+import { createEgressProxyHandler } from "./egress-proxy.js";
+import { handleFilterOutput } from "./filter-endpoint.js";
 import { createLlmProxyHandler } from "./llm-proxy.js";
 import { requestIdMiddleware } from "./request-id.js";
 import { createResponseSigner } from "./response-signer.js";
-import { type ClassifyGuards, handleClassify } from "./classify-endpoint.js";
-import type { DelegationQueue } from "./delegate-handler.js";
-import { handleFilterOutput } from "./filter-endpoint.js";
 import {
 	type ConfirmFn,
 	handleExecute,
@@ -50,6 +58,7 @@ export function createApp(
 	vault?: CredentialVault,
 	hmacSecret?: Buffer,
 	delegationQueue?: DelegationQueue,
+	egressBindings?: EgressBinding[],
 ): Hono {
 	const app = new Hono();
 	const pendingConfirmations = new Map<string, PendingConfirmation>();
@@ -122,8 +131,10 @@ export function createApp(
 	app.use("/execute", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
 	app.use("/classify", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
 	app.use("/filter-output", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
+	app.use("/confirm-only", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
 	// SENTINEL: I7 — 25MB for LLM proxy to accommodate large context windows (200K+ tokens)
 	app.use("/proxy/llm/*", createBodyLimitMiddleware(25 * 1024 * 1024, "25MB"));
+	app.use("/proxy/egress", createBodyLimitMiddleware(10 * 1024 * 1024, "10MB"));
 
 	// SENTINEL: HMAC-SHA256 response signing for integrity verification (B4)
 	// Placed before routes so all responses (including /health) get signed
@@ -184,6 +195,18 @@ export function createApp(
 				`[classify] Unhandled error: ${error instanceof Error ? error.message : "Unknown"}`,
 			);
 			return c.json({ error: "Internal classification error" }, 500);
+		}
+	});
+
+	// SENTINEL: Wave 2.4 — classify + TUI confirmation without execution (for OpenClaw plugin)
+	app.post("/confirm-only", async (c) => {
+		try {
+			return await handleConfirmOnly(c, config, auditLogger, guards as ClassifyGuards, confirmFn);
+		} catch (error) {
+			console.error(
+				`[confirm-only] Unhandled error: ${error instanceof Error ? error.message : "Unknown"}`,
+			);
+			return c.json({ error: "Internal confirmation error" }, 500);
 		}
 	});
 
@@ -251,6 +274,11 @@ export function createApp(
 
 	// SENTINEL: Vault-based key injection when available, env var fallback otherwise
 	app.all("/proxy/llm/*", createLlmProxyHandler(vault, auditLogger));
+
+	// SENTINEL: Wave 2.4 — egress proxy with domain-scoped credential injection
+	if (egressBindings && egressBindings.length > 0) {
+		app.post("/proxy/egress", createEgressProxyHandler(vault, auditLogger, egressBindings));
+	}
 
 	app.post("/execute", async (c) => {
 		try {

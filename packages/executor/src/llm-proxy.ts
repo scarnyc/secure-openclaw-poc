@@ -37,21 +37,35 @@ const ALLOWED_LLM_HOSTS = new Set([
  * Map of LLM provider hostnames to their required API key env var names.
  * The proxy injects the appropriate key from executor env or vault.
  */
-const HOST_AUTH_HEADERS: Record<string, { envVar: string; headerName: string; prefix?: string }> = {
+const HOST_AUTH_HEADERS: Record<
+	string,
+	{ envVar: string; headerName: string; prefix?: string; vaultServiceId: string }
+> = {
 	"api.anthropic.com": {
 		envVar: "ANTHROPIC_API_KEY",
 		headerName: "x-api-key",
+		vaultServiceId: "anthropic",
 	},
 	"api.openai.com": {
 		envVar: "OPENAI_API_KEY",
 		headerName: "Authorization",
 		prefix: "Bearer ",
+		vaultServiceId: "openai",
 	},
 	"generativelanguage.googleapis.com": {
 		envVar: "GEMINI_API_KEY",
 		headerName: "x-goog-api-key",
+		vaultServiceId: "gemini",
 	},
 };
+
+/** Upstream fetch timeout — prevents indefinite hangs from DNS, TLS, or slow responses. */
+const UPSTREAM_TIMEOUT_MS = 60_000;
+
+const debug =
+	process.env.SENTINEL_DEBUG === "true"
+		? (reqId: string, msg: string) => console.log(`[llm-proxy][${reqId}] ${msg}`)
+		: () => {};
 
 /**
  * Creates an LLM proxy handler. When vault is provided, attempts vault-based
@@ -66,17 +80,38 @@ export function createLlmProxyHandler(
 ): (c: Context) => Promise<Response> {
 	return async (c: Context): Promise<Response> => {
 		const proxyStart = Date.now();
+		const reqId = crypto.randomUUID().slice(0, 8);
+
 		// Extract the downstream path (everything after /proxy/llm)
 		const url = new URL(c.req.url);
 		const proxyPrefix = "/proxy/llm";
-		const downstreamPath = url.pathname.slice(proxyPrefix.length);
+		let downstreamPath = url.pathname.slice(proxyPrefix.length);
+
+		// Provider-prefixed routing: /proxy/llm/anthropic/v1/messages
+		// Maps provider name to host and strips the prefix from downstream path
+		const PROVIDER_HOSTS: Record<string, string> = {
+			anthropic: "api.anthropic.com",
+			openai: "api.openai.com",
+			gemini: "generativelanguage.googleapis.com",
+		};
+		let targetHost = c.req.header("x-llm-host") ?? "";
+		for (const [prefix, host] of Object.entries(PROVIDER_HOSTS)) {
+			if (downstreamPath.startsWith(`/${prefix}/`) || downstreamPath === `/${prefix}`) {
+				targetHost = host;
+				downstreamPath = downstreamPath.slice(`/${prefix}`.length) || "/";
+				break;
+			}
+		}
+		// Default to Anthropic if no provider prefix and no x-llm-host header
+		if (!targetHost) {
+			targetHost = "api.anthropic.com";
+		}
+
+		console.log(`[llm-proxy][${reqId}] ${c.req.method} ${targetHost}${downstreamPath}`);
 
 		if (!downstreamPath || downstreamPath === "/") {
 			return c.json({ error: "Missing downstream path" }, 400);
 		}
-
-		// Determine target host from x-llm-host header (default: api.anthropic.com)
-		const targetHost = c.req.header("x-llm-host") ?? "api.anthropic.com";
 
 		if (!ALLOWED_LLM_HOSTS.has(targetHost)) {
 			// SENTINEL: M8 — Audit blocked host requests
@@ -129,8 +164,10 @@ export function createLlmProxyHandler(
 		// DNS rebinding defense: SSRF allowlist + IP-pinned fetch via undici Agent when resolved IPs available
 		let ssrfResolvedIps: string[] | undefined;
 		try {
+			debug(reqId, "SSRF check starting");
 			const ssrfResult = await checkSsrf(targetUrl);
 			ssrfResolvedIps = ssrfResult?.resolvedIps;
+			debug(reqId, `SSRF check passed (${Date.now() - proxyStart}ms)`);
 		} catch (error) {
 			if (error instanceof SsrfError) {
 				// SENTINEL: M8 — Audit SSRF-blocked requests
@@ -171,9 +208,15 @@ export function createLlmProxyHandler(
 			let credentialSet = false;
 			if (vault) {
 				try {
-					await useCredential(vault, `llm/${targetHost}`, (cred) => {
-						const value = authConfig.prefix ? `${authConfig.prefix}${cred.key}` : cred.key;
-						forwardHeaders.set(authConfig.headerName, value);
+					await useCredential(vault, authConfig.vaultServiceId, (cred) => {
+						// OAuth tokens (sk-ant-oat*) use Authorization: Bearer
+						// API keys (sk-ant-api*) use x-api-key
+						if (targetHost === "api.anthropic.com" && cred.key.startsWith("sk-ant-oat")) {
+							forwardHeaders.set("Authorization", `Bearer ${cred.key}`);
+						} else {
+							const value = authConfig.prefix ? `${authConfig.prefix}${cred.key}` : cred.key;
+							forwardHeaders.set(authConfig.headerName, value);
+						}
 						credentialSet = true;
 					});
 				} catch (error) {
@@ -221,16 +264,27 @@ export function createLlmProxyHandler(
 		}
 
 		// Single fetch path for both vault and env var credentials
-		const pinnedFetch = ssrfResolvedIps?.length
-			? createIpPinnedFetch(ssrfResolvedIps[0], targetHost)
-			: globalThis.fetch;
+		// Read body upfront to avoid ReadableStream compatibility issues with undici
+		const requestBody = c.req.method !== "GET" ? await c.req.text() : undefined;
+		debug(reqId, `body=${requestBody ? requestBody.length : 0}B`);
+		// Use globalThis.fetch directly — undici IP-pinned fetch causes hangs in Node 22 Alpine
+		const pinnedFetch = globalThis.fetch;
+		// SENTINEL: Abort upstream after timeout to prevent indefinite hangs
+		const fetchController = new AbortController();
+		const fetchTimer = setTimeout(() => {
+			console.error(
+				`[llm-proxy][${reqId}] upstream fetch timed out after ${UPSTREAM_TIMEOUT_MS}ms`,
+			);
+			fetchController.abort();
+		}, UPSTREAM_TIMEOUT_MS);
 		try {
 			const upstreamResponse = await pinnedFetch(targetUrl, {
 				method: c.req.method,
 				headers: forwardHeaders,
-				body: c.req.method !== "GET" ? c.req.raw.body : undefined,
-				duplex: "half",
+				body: requestBody,
+				signal: fetchController.signal,
 			});
+			clearTimeout(fetchTimer);
 
 			// Filter response headers — only forward allowlisted headers to agent
 			const responseHeaders = new Headers();
@@ -297,9 +351,11 @@ export function createLlmProxyHandler(
 			// The Response constructor will compute the correct value.
 			responseHeaders.delete("content-length");
 
+			const duration = Date.now() - proxyStart;
+			console.log(`[llm-proxy][${reqId}] ${upstreamResponse.status} (${duration}ms)`);
+
 			// SENTINEL: M8 — Audit LLM proxy requests (metadata only, no body content)
 			if (auditLogger) {
-				const duration = Date.now() - proxyStart;
 				try {
 					auditLogger.log({
 						id: crypto.randomUUID(),
@@ -326,10 +382,11 @@ export function createLlmProxyHandler(
 				headers: responseHeaders,
 			});
 		} catch (error) {
+			clearTimeout(fetchTimer);
 			// Log details server-side but return generic message to untrusted agent
 			// to avoid leaking internal network topology (IPs, DNS, ports)
 			console.error(
-				`[llm-proxy] Upstream request failed: ${error instanceof Error ? error.message : "Unknown"}`,
+				`[llm-proxy][${reqId}] Upstream request failed (${Date.now() - proxyStart}ms): ${error instanceof Error ? `${error.message} ${error.cause ? JSON.stringify(error.cause) : ""}` : "Unknown"}`,
 			);
 			// SENTINEL: M8 — Audit upstream errors
 			if (auditLogger) {

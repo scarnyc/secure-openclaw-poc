@@ -1,5 +1,5 @@
-import { DelegateCodeParamsSchema } from "@sentinel/types";
 import type { ToolResult } from "@sentinel/types";
+import { DelegateCodeParamsSchema } from "@sentinel/types";
 import Database from "better-sqlite3";
 
 const CREATE_DELEGATION_TABLE = `
@@ -72,9 +72,7 @@ export class DelegationQueue {
 				)
 				.run(status, prUrl, id);
 		} else {
-			this.db
-				.prepare("UPDATE delegation_queue SET status = ? WHERE id = ?")
-				.run(status, id);
+			this.db.prepare("UPDATE delegation_queue SET status = ? WHERE id = ?").run(status, id);
 		}
 	}
 

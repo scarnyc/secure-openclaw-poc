@@ -51,6 +51,16 @@ export {
 	DelegateCodeParamsSchema,
 } from "./delegate-code.js";
 export {
+	ALLOWED_DOMAINS_KEY,
+	type EgressBinding,
+	EgressBindingSchema,
+	type EgressConfig,
+	EgressConfigSchema,
+	type EgressRequest,
+	EgressRequestSchema,
+	PLACEHOLDER_PATTERN,
+} from "./egress.js";
+export {
 	type FilterOutputRequest,
 	FilterOutputRequestSchema,
 	type FilterOutputResponse,

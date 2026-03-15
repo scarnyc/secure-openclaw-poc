@@ -5,12 +5,18 @@ WORKDIR /app
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml tsconfig.base.json tsconfig.json ./
 COPY packages/ ./packages/
 RUN pnpm install --frozen-lockfile
+# Clean stale dist/ from COPY (tsup bundles break native ESM imports)
+# Remove test files before build — they import devDependencies not available in Docker
+RUN find packages -name dist -type d -exec rm -rf {} + 2>/dev/null; true
+RUN find packages -name '*.tsbuildinfo' -delete 2>/dev/null; true
+RUN find packages -name '*.test.ts' -delete 2>/dev/null; true
 RUN npx tsc -b
 
 # Executor stage
 FROM node:22-alpine AS executor
-# SENTINEL: H2 — firejail for bash sandboxing in Docker
-RUN apk add --no-cache dumb-init firejail
+# SENTINEL: H2 — container hardening (read_only, cap_drop ALL, no-new-privileges)
+# provides defense-in-depth; firejail omitted (not in Alpine repos)
+RUN apk add --no-cache dumb-init
 WORKDIR /app
 COPY --from=build /app/packages/ ./packages/
 COPY --from=build /app/node_modules ./node_modules/
@@ -34,3 +40,24 @@ COPY --from=build /app/node_modules ./node_modules/
 USER node
 ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "packages/agent/dist/loop.js"]
+
+# OpenClaw Gateway stage
+FROM node:22-alpine AS openclaw-gateway
+RUN apk add --no-cache dumb-init
+# Install OpenClaw globally
+RUN npm install -g openclaw@latest
+WORKDIR /app
+# Copy Sentinel plugin from build stage
+COPY --from=build /app/packages/openclaw-plugin/dist/ ./plugin/dist/
+COPY --from=build /app/packages/openclaw-plugin/openclaw.plugin.json ./plugin/
+COPY --from=build /app/packages/openclaw-plugin/package.json ./plugin/
+# Copy types dist (plugin dependency)
+COPY --from=build /app/packages/types/dist/ ./packages/types/dist/
+COPY --from=build /app/packages/types/package.json ./packages/types/
+# Node modules for plugin runtime dependencies
+COPY --from=build /app/node_modules ./node_modules/
+RUN mkdir -p /app/data && chown node:node /app/data
+USER node
+EXPOSE 8080
+ENTRYPOINT ["dumb-init", "--"]
+CMD ["openclaw", "gateway", "--bind", "loopback", "--port", "8080"]

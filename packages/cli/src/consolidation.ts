@@ -36,18 +36,14 @@ export function consolidateAudit(options: ConsolidationOptions): ConsolidationRe
 		);
 		if (blocked.length > 0) {
 			const toolCounts = countByField(blocked, "tool");
-			observations.push(
-				`${blocked.length} blocked actions: ${formatCounts(toolCounts)}`,
-			);
+			observations.push(`${blocked.length} blocked actions: ${formatCounts(toolCounts)}`);
 		}
 
 		// Observation 2: Denied by user
 		const denied = entries.filter((e) => e.result === "denied_by_user");
 		if (denied.length > 0) {
 			const toolCounts = countByField(denied, "tool");
-			observations.push(
-				`${denied.length} user-denied actions: ${formatCounts(toolCounts)}`,
-			);
+			observations.push(`${denied.length} user-denied actions: ${formatCounts(toolCounts)}`);
 		}
 
 		// Observation 3: Tool usage distribution
@@ -78,10 +74,7 @@ export function consolidateAudit(options: ConsolidationOptions): ConsolidationRe
 	}
 }
 
-function countByField(
-	entries: AuditEntry[],
-	field: keyof AuditEntry,
-): Record<string, number> {
+function countByField(entries: AuditEntry[], field: keyof AuditEntry): Record<string, number> {
 	const counts: Record<string, number> = {};
 	for (const entry of entries) {
 		const value = String(entry[field] ?? "unknown");

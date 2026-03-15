@@ -1,10 +1,10 @@
 import { redactAll, redactPII } from "@sentinel/types";
-import { type PluginConfig, PluginConfigSchema, loadConfigFromEnv } from "./config.js";
+import { loadConfigFromEnv, type PluginConfig, PluginConfigSchema } from "./config.js";
 import { ExecutorClient } from "./executor-client.js";
 import { HealthMonitor } from "./health-monitor.js";
 import { buildManifest, type SessionContext } from "./manifest-bridge.js";
 
-export { type PluginConfig, PluginConfigSchema, loadConfigFromEnv } from "./config.js";
+export { loadConfigFromEnv, type PluginConfig, PluginConfigSchema } from "./config.js";
 export { ExecutorClient } from "./executor-client.js";
 export { HealthMonitor } from "./health-monitor.js";
 export { buildManifest, type SessionContext } from "./manifest-bridge.js";
@@ -36,9 +36,7 @@ export interface SentinelPlugin {
  * 2. afterToolCall — posts audit data (informational)
  * 3. sanitizeOutput — redacts credentials and PII before transcript write
  */
-export function createSentinelPlugin(
-	config?: Partial<PluginConfig>,
-): SentinelPlugin {
+export function createSentinelPlugin(config?: Partial<PluginConfig>): SentinelPlugin {
 	const resolved = PluginConfigSchema.parse({
 		...loadConfigFromEnv(),
 		...config,
@@ -67,12 +65,7 @@ export function createSentinelPlugin(
 			}
 
 			try {
-				const manifest = buildManifest(
-					ctx.toolName,
-					ctx.params,
-					ctx.runId,
-					ctx.session,
-				);
+				const manifest = buildManifest(ctx.toolName, ctx.params, ctx.runId, ctx.session);
 
 				const response = await client.classify(
 					manifest.tool,
