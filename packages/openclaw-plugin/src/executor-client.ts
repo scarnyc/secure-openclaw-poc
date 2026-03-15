@@ -13,18 +13,21 @@ export interface ExecutorClientOptions {
 	executorUrl: string;
 	authToken?: string;
 	timeoutMs: number;
+	confirmationTimeoutMs?: number;
 }
 
 export class ExecutorClient {
 	private readonly baseUrl: string;
 	private readonly authToken?: string;
 	private readonly timeoutMs: number;
+	private readonly confirmationTimeoutMs: number;
 
 	constructor(options: ExecutorClientOptions) {
 		// Strip trailing slash
 		this.baseUrl = options.executorUrl.replace(/\/+$/, "");
 		this.authToken = options.authToken;
 		this.timeoutMs = options.timeoutMs;
+		this.confirmationTimeoutMs = options.confirmationTimeoutMs ?? options.timeoutMs;
 	}
 
 	static fromConfig(config: PluginConfig): ExecutorClient {
@@ -32,6 +35,7 @@ export class ExecutorClient {
 			executorUrl: config.executorUrl,
 			authToken: config.authToken,
 			timeoutMs: config.connectionTimeoutMs,
+			confirmationTimeoutMs: config.confirmationTimeoutMs,
 		});
 	}
 
@@ -68,7 +72,7 @@ export class ExecutorClient {
 		sessionId: string,
 	): Promise<ConfirmOnlyResponse> {
 		const body = { tool, params, agentId, sessionId, source: "openclaw" as const };
-		const res = await this.post("/confirm-only", body);
+		const res = await this.post("/confirm-only", body, this.confirmationTimeoutMs);
 		return (await res.json()) as ConfirmOnlyResponse;
 	}
 
@@ -83,9 +87,9 @@ export class ExecutorClient {
 		}
 	}
 
-	private async post(path: string, body: unknown): Promise<Response> {
+	private async post(path: string, body: unknown, timeoutOverrideMs?: number): Promise<Response> {
 		const controller = new AbortController();
-		const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+		const timer = setTimeout(() => controller.abort(), timeoutOverrideMs ?? this.timeoutMs);
 		try {
 			const res = await fetch(`${this.baseUrl}${path}`, {
 				method: "POST",

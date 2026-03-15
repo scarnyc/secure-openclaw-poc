@@ -147,6 +147,89 @@ describe("ExecutorClient", () => {
 		expect(headers.Authorization).toBe("Bearer test-token-123");
 	});
 
+	it("confirmOnly sends POST to /confirm-only with source openclaw", async () => {
+		const confirmResponse = {
+			decision: "approved",
+			manifestId: "00000000-0000-0000-0000-000000000002",
+		};
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve(confirmResponse),
+		});
+
+		const client = new ExecutorClient({
+			executorUrl: "http://127.0.0.1:3141",
+			timeoutMs: 5000,
+			confirmationTimeoutMs: 330_000,
+		});
+		const result = await client.confirmOnly(
+			"send_email",
+			{ to: "user@example.com" },
+			"agent-1",
+			"session-1",
+		);
+
+		expect(mockFetch).toHaveBeenCalledOnce();
+		const [url, options] = mockFetch.mock.calls[0] as [string, RequestInit];
+		expect(url).toBe("http://127.0.0.1:3141/confirm-only");
+		expect(options.method).toBe("POST");
+		const parsed = JSON.parse(options.body as string);
+		expect(parsed.source).toBe("openclaw");
+		expect(parsed.tool).toBe("send_email");
+		expect(parsed.agentId).toBe("agent-1");
+		expect(result.decision).toBe("approved");
+	});
+
+	it("confirmOnly uses confirmationTimeoutMs for AbortController timeout", async () => {
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () => Promise.resolve({ decision: "approved", manifestId: "test-id" }),
+		});
+
+		const client = new ExecutorClient({
+			executorUrl: "http://127.0.0.1:3141",
+			timeoutMs: 5_000,
+			confirmationTimeoutMs: 330_000,
+		});
+		await client.confirmOnly("send_email", {}, "agent-1", "session-1");
+
+		const timeoutCalls = setTimeoutSpy.mock.calls.map((call) => call[1]);
+		expect(timeoutCalls).toContain(330_000);
+
+		setTimeoutSpy.mockRestore();
+	});
+
+	it("classify still uses fast timeoutMs", async () => {
+		const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+		mockFetch.mockResolvedValueOnce({
+			ok: true,
+			json: () =>
+				Promise.resolve({
+					decision: "auto_approve",
+					category: "read",
+					reason: "Read operation",
+					manifestId: "test-id",
+				}),
+		});
+
+		const client = new ExecutorClient({
+			executorUrl: "http://127.0.0.1:3141",
+			timeoutMs: 5_000,
+			confirmationTimeoutMs: 330_000,
+		});
+		await client.classify("read_file", { path: "/tmp" }, "agent-1", "session-1");
+
+		const timeoutCalls = setTimeoutSpy.mock.calls.map((call) => call[1]);
+		expect(timeoutCalls).toContain(5_000);
+		expect(timeoutCalls).not.toContain(330_000);
+
+		setTimeoutSpy.mockRestore();
+	});
+
 	it("strips trailing slash from URL", async () => {
 		mockFetch.mockResolvedValueOnce({
 			ok: true,

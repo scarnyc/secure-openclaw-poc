@@ -6,6 +6,7 @@ export const PluginConfigSchema = z.object({
 	failMode: z.enum(["closed", "open"]).default("closed"),
 	healthCheckIntervalMs: z.number().positive().default(30_000),
 	connectionTimeoutMs: z.number().positive().default(5_000),
+	confirmationTimeoutMs: z.number().positive().default(330_000),
 });
 export type PluginConfig = z.infer<typeof PluginConfigSchema>;
 
@@ -14,6 +15,9 @@ export function loadConfigFromEnv(): PluginConfig {
 		executorUrl: process.env.SENTINEL_EXECUTOR_URL || undefined,
 		authToken: process.env.SENTINEL_AUTH_TOKEN || undefined,
 		failMode: process.env.SENTINEL_FAIL_MODE || undefined,
+		confirmationTimeoutMs: process.env.SENTINEL_CONFIRMATION_TIMEOUT_MS
+			? Number(process.env.SENTINEL_CONFIRMATION_TIMEOUT_MS)
+			: undefined,
 	});
 	if (process.env.SENTINEL_DOCKER === "true" && config.failMode === "open") {
 		console.error(
