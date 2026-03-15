@@ -6,6 +6,7 @@ import type { EgressBinding } from "@sentinel/types";
 import { ensureDockerAuth } from "./docker-auth.js";
 import { applyDockerDefaults } from "./docker-defaults.js";
 import { createApp } from "./server.js";
+import { TelegramConfirmAdapter } from "./telegram-confirm.js";
 import { createToolRegistry } from "./tools/index.js";
 
 const mutableConfig = getDefaultConfig();
@@ -92,11 +93,38 @@ if (egressBindingsRaw) {
 	}
 }
 
-const app = createApp(config, auditLogger, registry, vault, hmacSecret, undefined, egressBindings);
+// SENTINEL: Telegram confirmation adapter — sends confirmation prompts via Telegram bot
+let telegramAdapter: TelegramConfirmAdapter | undefined;
+const telegramChatId = process.env.SENTINEL_TELEGRAM_CHAT_ID;
+if (telegramChatId && vault) {
+	try {
+		// Adapter is passed to createApp, which calls bindResolver() to wire pendingConfirmations
+		telegramAdapter = new TelegramConfirmAdapter(vault, telegramChatId);
+	} catch (err) {
+		console.error(
+			`[sentinel] Failed to create Telegram adapter: ${err instanceof Error ? err.message : "Unknown"}`,
+		);
+	}
+}
+
+const app = createApp(
+	config,
+	auditLogger,
+	registry,
+	vault,
+	hmacSecret,
+	undefined,
+	egressBindings,
+	telegramAdapter,
+);
 
 const port = config.executor.port;
 const host = "0.0.0.0";
 
 serve({ fetch: app.fetch, port, hostname: host }, () => {
 	console.log(`Sentinel Executor listening on http://${host}:${port}`);
+	if (telegramAdapter) {
+		telegramAdapter.start();
+		console.log(`[sentinel] Telegram confirmations active (chat: ${telegramChatId})`);
+	}
 });
