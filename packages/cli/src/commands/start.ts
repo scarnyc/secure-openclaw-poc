@@ -1,5 +1,5 @@
-import { randomBytes } from "node:crypto";
 import { execFileSync, execSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
@@ -127,7 +127,9 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	}
 
 	console.log(`Starting Sentinel (${targets.join(", ")})...`);
-	console.log(`Auth token: ${authToken.slice(0, 8)}...${authToken.slice(-4)} (${authToken.length} chars)`);
+	console.log(
+		`Auth token: ${authToken.slice(0, 8)}...${authToken.slice(-4)} (${authToken.length} chars)`,
+	);
 
 	// Build images
 	console.log("Building Docker images...");
@@ -149,7 +151,12 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	try {
 		// SENTINEL: --force-recreate ensures containers pick up new env vars (auth token, vault password)
 		// Without this, docker compose may reuse existing containers with stale env values.
-		run(projectRoot, "docker", ["compose", "-f", composeFile, "up", "-d", "--force-recreate", ...targets], composeEnv);
+		run(
+			projectRoot,
+			"docker",
+			["compose", "-f", composeFile, "up", "-d", "--force-recreate", ...targets],
+			composeEnv,
+		);
 	} catch (err) {
 		console.error("Failed to start:", err instanceof Error ? err.message : String(err));
 		process.exit(1);
@@ -190,7 +197,9 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 				}
 			}
 		} catch (err) {
-			console.warn(`[sentinel] Could not update openclaw.json: ${err instanceof Error ? err.message : "Unknown"}`);
+			console.warn(
+				`[sentinel] Could not update openclaw.json: ${err instanceof Error ? err.message : "Unknown"}`,
+			);
 		}
 	}
 

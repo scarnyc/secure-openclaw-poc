@@ -15,6 +15,87 @@ const DEFAULT_MAX_RESPONSE_BYTES = 10 * 1024 * 1024;
 /** Upstream fetch timeout. */
 const UPSTREAM_TIMEOUT_MS = 60_000;
 
+// ---------------------------------------------------------------------------
+// Telegram getUpdates interception
+// ---------------------------------------------------------------------------
+
+export interface TelegramInterceptor {
+	chatId: number;
+	resolveConfirmation: (manifestId: string, approved: boolean) => boolean;
+	telegramApi: (method: string, params: Record<string, unknown>) => Promise<unknown>;
+}
+
+interface TelegramUpdate {
+	update_id: number;
+	callback_query?: {
+		id: string;
+		data?: string;
+		message?: { chat?: { id: number } };
+	};
+	[key: string]: unknown;
+}
+
+/**
+ * Intercept Telegram getUpdates responses, extracting confirmation callbacks.
+ * Uses map() — replaces confirm callbacks with bare {update_id} stubs to
+ * preserve offset tracking. Non-confirm updates pass through unchanged.
+ */
+function interceptTelegramUpdates(
+	updates: TelegramUpdate[],
+	interceptor: TelegramInterceptor,
+): TelegramUpdate[] {
+	return updates.map((update) => {
+		if (!update.callback_query?.data?.startsWith("confirm:")) {
+			return update; // pass through non-confirm updates unchanged
+		}
+
+		const { callback_query } = update;
+		const callbackData = callback_query.data as string; // narrowed by startsWith guard above
+
+		// Security: verify callback came from authorized chat
+		if (callback_query.message?.chat?.id !== interceptor.chatId) {
+			console.warn(
+				`[egress-telegram] SECURITY: callback from unauthorized chat ${callback_query.message?.chat?.id}`,
+			);
+			return { update_id: update.update_id }; // stub (preserves offset, no resolution)
+		}
+
+		// Parse callback data: "confirm:manifestId:action"
+		const parts = callbackData.split(":");
+		if (parts.length !== 3) {
+			console.warn(`[egress-telegram] Malformed callback data: ${callbackData}`);
+			return { update_id: update.update_id }; // stub
+		}
+
+		const manifestId = parts[1];
+		const action = parts[2];
+		if (action !== "approve" && action !== "reject") {
+			console.warn(`[egress-telegram] Malformed callback data: ${callbackData}`);
+			return { update_id: update.update_id }; // stub
+		}
+
+		const approved = action === "approve";
+		const resolved = interceptor.resolveConfirmation(manifestId, approved);
+
+		// Answer the callback (fire-and-forget)
+		interceptor
+			.telegramApi("answerCallbackQuery", {
+				callback_query_id: callback_query.id,
+				text: resolved
+					? approved
+						? "Approved"
+						: "Rejected"
+					: "Action not found (may have timed out)",
+				show_alert: !resolved,
+			})
+			.catch((err) => {
+				console.warn(`[egress-telegram] answerCallbackQuery failed: ${err}`);
+			});
+
+		return { update_id: update.update_id }; // stub — preserves offset
+	});
+}
+
 /** Response headers safe to forward back to the agent. */
 const ALLOWED_RESPONSE_HEADERS = new Set([
 	"content-type",
@@ -119,6 +200,7 @@ export function createEgressProxyHandler(
 	auditLogger: AuditLogger,
 	bindings: EgressBinding[],
 	maxResponseBytes = DEFAULT_MAX_RESPONSE_BYTES,
+	telegramInterceptor?: TelegramInterceptor,
 ): (c: Context) => Promise<Response> {
 	const domainMap = buildDomainMap(bindings);
 
@@ -271,14 +353,33 @@ export function createEgressProxyHandler(
 			return c.json({ error: "Egress proxy credential error" }, 500);
 		}
 
+		// Detect Telegram getUpdates for long-poll timeout extension and interception
+		const isTelegramGetUpdates =
+			targetHost === "api.telegram.org" && targetUrl.pathname.endsWith("/getUpdates");
+
+		// Long-poll timeout: extend upstream timeout if Telegram getUpdates timeout > 45s
+		let effectiveTimeoutMs = UPSTREAM_TIMEOUT_MS;
+		if (isTelegramGetUpdates && forwardBody) {
+			try {
+				const parsedBody = JSON.parse(forwardBody) as Record<string, unknown>;
+				const pollTimeout = typeof parsedBody.timeout === "number" ? parsedBody.timeout : 0;
+				const requiredMs = pollTimeout * 1000 + 15_000;
+				if (requiredMs > UPSTREAM_TIMEOUT_MS) {
+					effectiveTimeoutMs = requiredMs;
+				}
+			} catch {
+				// Body not JSON — use default timeout
+			}
+		}
+
 		// Forward request to destination
 		const fetchController = new AbortController();
 		const fetchTimer = setTimeout(() => {
 			console.error(
-				`[egress-proxy][${reqId}] upstream fetch timed out after ${UPSTREAM_TIMEOUT_MS}ms`,
+				`[egress-proxy][${reqId}] upstream fetch timed out after ${effectiveTimeoutMs}ms`,
 			);
 			fetchController.abort();
-		}, UPSTREAM_TIMEOUT_MS);
+		}, effectiveTimeoutMs);
 
 		try {
 			const upstreamResponse = await fetch(forwardUrl, {
@@ -323,7 +424,7 @@ export function createEgressProxyHandler(
 				}
 			}
 
-			const rawBody = new TextDecoder().decode(
+			let rawBody = new TextDecoder().decode(
 				chunks.length === 1
 					? chunks[0]
 					: chunks.reduce((acc, chunk) => {
@@ -333,6 +434,22 @@ export function createEgressProxyHandler(
 							return merged;
 						}, new Uint8Array(0)),
 			);
+
+			// Telegram getUpdates interception — before credential redaction
+			if (isTelegramGetUpdates && telegramInterceptor && upstreamResponse.status === 200) {
+				try {
+					const parsed = JSON.parse(rawBody) as {
+						ok?: boolean;
+						result?: TelegramUpdate[];
+					};
+					if (parsed.ok === true && Array.isArray(parsed.result)) {
+						const intercepted = interceptTelegramUpdates(parsed.result, telegramInterceptor);
+						rawBody = JSON.stringify({ ok: true, result: intercepted });
+					}
+				} catch {
+					// JSON parse failed — fall through to normal processing
+				}
+			}
 
 			// Filter credentials from response before returning to agent
 			const filteredBody = redactAllCredentialsWithEncoding(rawBody);

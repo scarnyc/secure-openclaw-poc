@@ -15,7 +15,7 @@ import { createAuthMiddleware } from "./auth-middleware.js";
 import { type ClassifyGuards, handleClassify } from "./classify-endpoint.js";
 import { handleConfirmOnly } from "./confirm-endpoint.js";
 import type { DelegationQueue } from "./delegate-handler.js";
-import { createEgressProxyHandler } from "./egress-proxy.js";
+import { createEgressProxyHandler, type TelegramInterceptor } from "./egress-proxy.js";
 import { handleFilterOutput } from "./filter-endpoint.js";
 import { createLlmProxyHandler } from "./llm-proxy.js";
 import { requestIdMiddleware } from "./request-id.js";
@@ -312,7 +312,20 @@ export function createApp(
 
 	// SENTINEL: Wave 2.4 — egress proxy with domain-scoped credential injection
 	if (egressBindings && egressBindings.length > 0) {
-		app.post("/proxy/egress", createEgressProxyHandler(vault, auditLogger, egressBindings));
+		// SENTINEL: Wire Telegram interceptor to intercept getUpdates responses in egress proxy
+		const telegramInterceptor: TelegramInterceptor | undefined = telegramAdapter
+			? {
+					chatId: telegramAdapter.chatId,
+					resolveConfirmation,
+					telegramApi: (method: string, params: Record<string, unknown>) =>
+						telegramAdapter.telegramApi(method, params),
+				}
+			: undefined;
+
+		app.post(
+			"/proxy/egress",
+			createEgressProxyHandler(vault, auditLogger, egressBindings, undefined, telegramInterceptor),
+		);
 	}
 
 	app.post("/execute", async (c) => {

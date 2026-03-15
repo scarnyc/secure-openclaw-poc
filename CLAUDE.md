@@ -18,9 +18,20 @@ Optional follow-up (separate commit) | The config only has sentinel-openai provi
 8. Wire register.ts into openclaw-plugin index.ts exports
 9. Set up sentinel memory plugin
 10. Fix set-up and create guide to make it more intuitive and user friendly
-11. use ag-ui protocol for all UI approve / rejects
-12. secure telegram channels upon server wind-down
-13. Fix vault password masking upon `sentinel start`
+11. use ag-ui protocol for all UI approve / rejects | Approach 5: Hybrid — Single Poller + ag-ui Events:
+  - Executor owns the single Telegram poll loop (existing)
+  - Exposes ag-ui SSE endpoint for real-time event streaming
+  - Telegram becomes one "renderer" of ag-ui events alongside web/TUI
+  - Confirmation is modeled as a custom ag-ui event pair: ConfirmationRequested → ConfirmationResolved
+12. Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates):
+- Execution result passthrough | plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
+- Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
+13. Revisit architecture to steal OpenAI's equip framework: https://openai.com/index/equip-responses-api-computer-environment/ | plan: `/Users/wills_mac_mini/.claude/plans/velvety-fluttering-hummingbird.md`
+14. OpenClaw memory isolation — separate memory systems (Phase 3)
+15. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
+16. Plugin hot-reload — currently requires gateway restart
+17. secure telegram channels upon server wind-down
+18. Fix vault password masking upon `sentinel start`
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
 
@@ -382,12 +393,6 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - [ ] Posthog for app analytics: https://posthog.com/
 - [ ] Moltworkers CF deployment: (https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/) | (https://github.com/cloudflare/moltworker)
 - [ ] Paperclip: Open-source orchestration for zero-human companies | https://github.com/paperclipai/paperclip
-- [ ] Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates)
-- [ ] Execution result passthrough — plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
-- [ ] Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
-- [ ] OpenClaw memory isolation — separate memory systems (Phase 3)
-- [ ] Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
-- [ ] Plugin hot-reload — currently requires gateway restart
 
 ### References
 - See `docs/plans/path-a-v2-adopt-openfang-primitives.md` §Phase 2 for security gaps and agent roster.

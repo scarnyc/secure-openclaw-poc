@@ -2,12 +2,6 @@ import type { CredentialVault } from "@sentinel/crypto";
 import { redactAll } from "@sentinel/types";
 
 const PARAM_TRUNCATE_LIMIT = 200;
-const POLL_TIMEOUT_SECONDS = 30;
-const POLL_ERROR_DELAY_MS = 5_000;
-/** Longer backoff for 409 conflicts — gives competing session time to release */
-const POLL_CONFLICT_DELAY_MS = 15_000;
-/** Stop polling after this many consecutive errors (permanent failure assumed) */
-const MAX_CONSECUTIVE_ERRORS = 10;
 /** Telegram limits callback_data to 64 bytes */
 const MAX_CALLBACK_DATA_LENGTH = 64;
 
@@ -19,23 +13,10 @@ export interface TelegramConfirmRequest {
 	reason: string;
 }
 
-interface CallbackQuery {
-	id: string;
-	data?: string;
-	message?: { chat: { id: number }; message_id: number };
-}
-
-interface TelegramUpdate {
-	update_id: number;
-	callback_query?: CallbackQuery;
-}
-
 export class TelegramConfirmAdapter {
 	private readonly vault: CredentialVault;
-	private readonly chatId: number;
+	public readonly chatId: number;
 	private resolveConfirmation: (id: string, approved: boolean) => boolean;
-	private running = false;
-	private offset = 0;
 
 	constructor(vault: CredentialVault, chatId: string) {
 		const parsed = Number.parseInt(chatId, 10);
@@ -50,26 +31,10 @@ export class TelegramConfirmAdapter {
 
 	/**
 	 * Bind the resolver function from createApp's pendingConfirmations Map.
-	 * Must be called before start() for Telegram callbacks to resolve confirmations.
+	 * Must be called for egress proxy callback interception to resolve confirmations.
 	 */
 	bindResolver(fn: (id: string, approved: boolean) => boolean): void {
 		this.resolveConfirmation = fn;
-	}
-
-	start(): void {
-		if (this.running) return;
-		this.running = true;
-		this.pollLoop().catch((err) => {
-			// SENTINEL: Reset running flag so start() can be retried (Finding 2)
-			this.running = false;
-			console.error(
-				`[telegram] FATAL: Poll loop crashed — Telegram confirmations disabled. Error: ${err instanceof Error ? err.message : "Unknown"}`,
-			);
-		});
-	}
-
-	stop(): void {
-		this.running = false;
 	}
 
 	async sendConfirmation(req: TelegramConfirmRequest): Promise<number | undefined> {
@@ -180,7 +145,7 @@ export class TelegramConfirmAdapter {
 		}
 	}
 
-	private async telegramApi(method: string, body: object): Promise<unknown> {
+	async telegramApi(method: string, body: object): Promise<unknown> {
 		const { useCredential } = await import("@sentinel/crypto");
 		return useCredential(this.vault, "telegram_bot", ["key"] as const, async (cred) => {
 			const res = await fetch(`https://api.telegram.org/bot${cred.key}/${method}`, {
@@ -197,131 +162,6 @@ export class TelegramConfirmAdapter {
 			}
 			return data.result;
 		});
-	}
-
-	private async pollLoop(): Promise<void> {
-		// SENTINEL: Clear any active webhook AND kick off stale getUpdates connections.
-		// Telegram rejects getUpdates with 409 Conflict if another session is polling.
-		// drop_pending_updates: true forces Telegram to close old connections.
-		try {
-			await this.telegramApi("deleteWebhook", { drop_pending_updates: true });
-			console.log("[telegram] deleteWebhook OK — cleared stale connections");
-		} catch (err) {
-			console.warn(
-				`[telegram] deleteWebhook failed (polling may 409): ${err instanceof Error ? err.message : "Unknown"}`,
-			);
-		}
-
-		let consecutiveErrors = 0;
-
-		while (this.running) {
-			try {
-				const updates = (await this.telegramApi("getUpdates", {
-					offset: this.offset,
-					timeout: POLL_TIMEOUT_SECONDS,
-				})) as TelegramUpdate[];
-
-				consecutiveErrors = 0; // Reset on success
-
-				for (const update of updates) {
-					this.offset = update.update_id + 1;
-					if (update.callback_query) {
-						await this.handleCallbackQuery(update.callback_query);
-					}
-				}
-
-				// Yield to event loop between poll cycles — in production, Telegram's
-				// long-poll timeout provides natural rate limiting; this prevents tight
-				// loops when the response returns instantly (e.g., in tests)
-				await sleep(0);
-			} catch (err) {
-				if (!this.running) return;
-				consecutiveErrors++;
-				const msg = err instanceof Error ? err.message : "Unknown";
-				const is409 = msg.includes("409");
-				console.error(
-					`[telegram] Poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${msg}`,
-				);
-
-				// SENTINEL: Finding 4 — stop after N consecutive failures (permanent error assumed)
-				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-					const hint = is409
-						? "Another bot instance may be using the same token. Check for duplicate deployments."
-						: "Check TELEGRAM vault credentials and network connectivity.";
-					console.error(
-						`[telegram] FATAL: ${consecutiveErrors} consecutive poll failures — stopping adapter. ${hint}`,
-					);
-					this.running = false;
-					return;
-				}
-
-				// 409 = competing getUpdates session; use longer backoff to let it expire
-				await sleep(is409 ? POLL_CONFLICT_DELAY_MS : POLL_ERROR_DELAY_MS);
-			}
-		}
-	}
-
-	private async handleCallbackQuery(query: CallbackQuery): Promise<void> {
-		const chatId = query.message?.chat.id;
-		if (chatId !== this.chatId) {
-			console.warn(
-				`[telegram] SECURITY: callback_query from unauthorized chat ${chatId} (expected ${this.chatId})`,
-			);
-			// SENTINEL: Finding 7 — answer unauthorized callbacks to prevent Telegram re-delivery
-			await this.telegramApi("answerCallbackQuery", {
-				callback_query_id: query.id,
-				text: "Unauthorized",
-				show_alert: true,
-			}).catch((answerErr) => {
-				console.warn(
-					`[telegram] answerCallbackQuery (unauthorized) failed: ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
-				);
-			});
-			return;
-		}
-
-		const data = query.data;
-		if (!data?.startsWith("confirm:")) return;
-
-		const parts = data.split(":");
-		if (parts.length !== 3) {
-			// SENTINEL: Finding 8 — log malformed confirm: callbacks instead of silent drop
-			console.warn(`[telegram] Malformed callback data (${parts.length} parts): ${data}`);
-			return;
-		}
-
-		const manifestId = parts[1];
-		const action = parts[2];
-		if (action !== "approve" && action !== "reject") {
-			console.warn(`[telegram] Unknown action in callback: ${action} (manifestId: ${manifestId})`);
-			return;
-		}
-
-		const approved = action === "approve";
-		const resolved = this.resolveConfirmation(manifestId, approved);
-
-		if (resolved) {
-			// SENTINEL: Finding 1 — replace empty catch with logging
-			await this.telegramApi("answerCallbackQuery", {
-				callback_query_id: query.id,
-				text: approved ? "✅ Approved" : "❌ Rejected",
-			}).catch((answerErr) => {
-				console.warn(
-					`[telegram] answerCallbackQuery failed for ${manifestId} (query: ${query.id}): ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
-				);
-			});
-		} else {
-			console.warn(`[telegram] Unknown manifestId in callback: ${manifestId}`);
-			await this.telegramApi("answerCallbackQuery", {
-				callback_query_id: query.id,
-				text: "⚠ Action not found (may have timed out)",
-				show_alert: true,
-			}).catch((answerErr) => {
-				console.warn(
-					`[telegram] answerCallbackQuery (alert) failed for ${manifestId} (query: ${query.id}): ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
-				);
-			});
-		}
 	}
 }
 
@@ -342,10 +182,6 @@ function formatParamValue(value: unknown): string {
  */
 function escapeMarkdownV2(text: string): string {
 	return text.replace(/([_*[\]()~`>#+\-=|{}.!\\])/g, "\\$1");
-}
-
-function sleep(ms: number): Promise<void> {
-	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 // Exported for testing

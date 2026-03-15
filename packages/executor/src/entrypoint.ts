@@ -101,7 +101,12 @@ if (vault) {
 	try {
 		const { useCredential } = await import("@sentinel/crypto");
 		// Read chat ID from vault — stored as separate entry via `sentinel vault add`
-		const chatId = await useCredential(vault, "TELEGRAM_CHAT", ["key"] as const, (cred) => cred.key);
+		const chatId = await useCredential(
+			vault,
+			"TELEGRAM_CHAT",
+			["key"] as const,
+			(cred) => cred.key,
+		);
 		telegramAdapter = new TelegramConfirmAdapter(vault, chatId);
 		console.log("[sentinel] Telegram adapter created from vault credentials");
 	} catch {
@@ -142,7 +147,6 @@ const host = "0.0.0.0";
 serve({ fetch: app.fetch, port, hostname: host }, () => {
 	console.log(`Sentinel Executor listening on http://${host}:${port}`);
 	if (telegramAdapter) {
-		telegramAdapter.start();
-		console.log("[sentinel] Telegram confirmations active");
+		console.log("[sentinel] Telegram confirmations active (via egress proxy interception)");
 	}
 });
