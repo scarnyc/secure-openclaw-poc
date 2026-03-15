@@ -1,13 +1,14 @@
 import { redactAll, redactPII } from "@sentinel/types";
-import { type PluginConfig, PluginConfigSchema, loadConfigFromEnv } from "./config.js";
+import { loadConfigFromEnv, type PluginConfig, PluginConfigSchema } from "./config.js";
 import { ExecutorClient } from "./executor-client.js";
 import { HealthMonitor } from "./health-monitor.js";
 import { buildManifest, type SessionContext } from "./manifest-bridge.js";
 
-export { type PluginConfig, PluginConfigSchema, loadConfigFromEnv } from "./config.js";
+export { loadConfigFromEnv, type PluginConfig, PluginConfigSchema } from "./config.js";
 export { ExecutorClient } from "./executor-client.js";
 export { HealthMonitor } from "./health-monitor.js";
 export { buildManifest, type SessionContext } from "./manifest-bridge.js";
+export { type OpenClawPluginApi, registerSentinelPlugin } from "./register.js";
 
 export interface BeforeToolCallResult {
 	block: boolean;
@@ -36,9 +37,7 @@ export interface SentinelPlugin {
  * 2. afterToolCall — posts audit data (informational)
  * 3. sanitizeOutput — redacts credentials and PII before transcript write
  */
-export function createSentinelPlugin(
-	config?: Partial<PluginConfig>,
-): SentinelPlugin {
+export function createSentinelPlugin(config?: Partial<PluginConfig>): SentinelPlugin {
 	const resolved = PluginConfigSchema.parse({
 		...loadConfigFromEnv(),
 		...config,
@@ -67,12 +66,7 @@ export function createSentinelPlugin(
 			}
 
 			try {
-				const manifest = buildManifest(
-					ctx.toolName,
-					ctx.params,
-					ctx.runId,
-					ctx.session,
-				);
+				const manifest = buildManifest(ctx.toolName, ctx.params, ctx.runId, ctx.session);
 
 				const response = await client.classify(
 					manifest.tool,
@@ -86,17 +80,20 @@ export function createSentinelPlugin(
 				}
 
 				if (response.decision === "confirm") {
-					// Route through executor's confirmation flow
-					const result = await client.execute({
-						...manifest,
-						source: "openclaw",
-					});
-					if (!result.success) {
+					// Route through executor's TUI confirmation flow (classify + confirm, no execution)
+					const confirmResult = await client.confirmOnly(
+						manifest.tool,
+						manifest.parameters,
+						manifest.agentId,
+						manifest.sessionId,
+					);
+					if (confirmResult.decision === "denied" || confirmResult.decision === "block") {
 						return {
 							block: true,
-							blockReason: (result.error as string) ?? "Execution denied",
+							blockReason: confirmResult.reason ?? "Denied by user",
 						};
 					}
+					// "approved" or "auto_approve" — allow through
 				}
 
 				// auto_approve — allow through

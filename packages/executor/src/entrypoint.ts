@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { AuditLogger } from "@sentinel/audit";
 import { CredentialVault } from "@sentinel/crypto";
 import { getDefaultConfig, validateConfig } from "@sentinel/policy";
+import type { EgressBinding } from "@sentinel/types";
 import { ensureDockerAuth } from "./docker-auth.js";
 import { applyDockerDefaults } from "./docker-defaults.js";
 import { createApp } from "./server.js";
@@ -10,6 +11,9 @@ import { createToolRegistry } from "./tools/index.js";
 const mutableConfig = getDefaultConfig();
 mutableConfig.auditLogPath = process.env.SENTINEL_AUDIT_PATH ?? "/app/data/audit.db";
 mutableConfig.vaultPath = process.env.SENTINEL_VAULT_PATH ?? "/app/data/vault.enc";
+if (process.env.SENTINEL_AUTH_TOKEN) {
+	mutableConfig.authToken = process.env.SENTINEL_AUTH_TOKEN;
+}
 
 let validated: import("@sentinel/types").SentinelConfig;
 try {
@@ -71,7 +75,24 @@ const registry = createToolRegistry({
 const { randomBytes: generateHmacBytes } = await import("node:crypto");
 const hmacSecret = generateHmacBytes(32);
 
-const app = createApp(config, auditLogger, registry, vault, hmacSecret);
+// SENTINEL: Wave 2.4 — Egress proxy domain-scoped credential bindings
+let egressBindings: EgressBinding[] = [];
+const egressBindingsRaw = process.env.SENTINEL_EGRESS_BINDINGS;
+if (egressBindingsRaw) {
+	try {
+		egressBindings = JSON.parse(egressBindingsRaw) as EgressBinding[];
+		console.log(
+			`[sentinel] Egress proxy configured with ${egressBindings.length} domain binding(s)`,
+		);
+	} catch (err) {
+		console.error(
+			`[sentinel] Failed to parse SENTINEL_EGRESS_BINDINGS: ${err instanceof Error ? err.message : "Unknown"}`,
+		);
+		// Fail-closed: invalid config means no egress proxy
+	}
+}
+
+const app = createApp(config, auditLogger, registry, vault, hmacSecret, undefined, egressBindings);
 
 const port = config.executor.port;
 const host = "0.0.0.0";

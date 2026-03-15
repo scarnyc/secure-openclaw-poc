@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -107,53 +107,81 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 		return;
 	}
 
-	// Step 5: Patch OpenClaw config — add LLM proxy baseUrls, disable ask mode
+	// Step 5: Patch OpenClaw config — add plugin config only (no unknown top-level keys)
 	spin.start("Patching OpenClaw configuration...");
+
+	// SENTINEL: plugins.load.paths tells OpenClaw where to find our plugin module.
+	// plugins.entries.sentinel configures it (enabled, failMode, tier).
+	const existingPlugins = (openclawConfig.plugins as Record<string, unknown> | undefined) ?? {};
+	const existingLoad = (existingPlugins.load as Record<string, unknown> | undefined) ?? {};
+	const existingPaths = (existingLoad.paths as string[] | undefined) ?? [];
+
+	// Add extension path if not already present
+	if (!existingPaths.includes(PLUGIN_DIR)) {
+		existingPaths.push(PLUGIN_DIR);
+	}
 
 	const patchedConfig = {
 		...openclawConfig,
-		llm: {
-			...(openclawConfig.llm as Record<string, unknown> | undefined),
-			baseUrls: {
-				anthropic: `${executorUrl}/proxy/llm/anthropic`,
-				openai: `${executorUrl}/proxy/llm/openai`,
-				gemini: `${executorUrl}/proxy/llm/gemini`,
+		plugins: {
+			...existingPlugins,
+			load: {
+				...existingLoad,
+				paths: existingPaths,
 			},
-		},
-		confirmation: {
-			mode: "sentinel",
-			executorUrl,
+			entries: {
+				...(existingPlugins.entries as Record<string, unknown> | undefined),
+				sentinel: {
+					enabled: true,
+					config: {
+						executorUrl,
+						failMode: "closed",
+						tier,
+					},
+				},
+			},
 		},
 	};
 
 	await writeFile(OPENCLAW_CONFIG_PATH, JSON.stringify(patchedConfig, null, "\t"), "utf-8");
 	spin.stop("OpenClaw configuration patched");
 
-	// Step 6: Install plugin
+	// Resolve __dirname for file lookups
+	const __filename = fileURLToPath(import.meta.url);
+	const __dirname = dirname(__filename);
+
+	// Step 6: Install plugin — copy dist files from package
 	spin.start("Installing Sentinel plugin...");
 	mkdirSync(PLUGIN_DIR, { recursive: true });
 
-	// Write plugin config
-	const pluginConfig = {
-		name: "@sentinel/openclaw-plugin",
-		executorUrl,
-		failMode: "closed",
-		tier,
-	};
-	writeFileSync(join(PLUGIN_DIR, "config.json"), JSON.stringify(pluginConfig, null, "\t"));
+	// Copy plugin files from package
+	const pluginPkgDir = resolve(__dirname, "../../packages/openclaw-plugin");
+	// Fallback path for when running from dist/
+	const fallbackPkgDir = resolve(__dirname, "../../../openclaw-plugin");
+	const sourcePkgDir = existsSync(pluginPkgDir) ? pluginPkgDir : fallbackPkgDir;
+
+	// Copy dist/, openclaw.plugin.json, and package.json
+	const filesToCopy = ["openclaw.plugin.json", "package.json"];
+	for (const file of filesToCopy) {
+		const src = join(sourcePkgDir, file);
+		if (existsSync(src)) {
+			copyFileSync(src, join(PLUGIN_DIR, file));
+		}
+	}
+
+	// Copy dist directory
+	const distSrc = join(sourcePkgDir, "dist");
+	if (existsSync(distSrc)) {
+		cpSync(distSrc, join(PLUGIN_DIR, "dist"), { recursive: true });
+	}
 
 	spin.stop("Sentinel plugin installed");
 
 	// Step 7: Generate SOUL.md from template
 	spin.start("Generating SOUL.md...");
 
-	const __filename = fileURLToPath(import.meta.url);
-	const __dirname = dirname(__filename);
 	const templatePath = resolve(__dirname, "../../packages/openclaw-plugin/templates/SOUL.md");
-	const fallbackTemplatePath = resolve(
-		__dirname,
-		"../../../openclaw-plugin/templates/SOUL.md",
-	);
+	const fallbackTemplatePath = resolve(__dirname, "../../../openclaw-plugin/templates/SOUL.md");
 
 	let template: string;
 	try {
@@ -174,10 +202,44 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 		.replace("{{TIER}}", tier as string)
 		.replace("{{TIER_CONSTRAINTS}}", TIER_CONSTRAINTS[tier as string] ?? "");
 
-	const soulPath = join(OPENCLAW_CONFIG_DIR, "SOUL.md");
+	const workspaceDir = join(OPENCLAW_CONFIG_DIR, "workspace");
+	mkdirSync(workspaceDir, { recursive: true });
+	const soulPath = join(workspaceDir, "SOUL.md");
+	// SENTINEL: Back up existing SOUL.md before overwriting — user may have customized it
+	if (existsSync(soulPath)) {
+		const backupPath = join(workspaceDir, `SOUL.md.backup.${Date.now()}`);
+		copyFileSync(soulPath, backupPath);
+		console.log(`  Backed up existing SOUL.md → ${backupPath}`);
+	}
 	writeFileSync(soulPath, soulContent);
 
 	spin.stop("SOUL.md generated");
+
+	// Step 7b: Write placeholder credentials info
+	spin.start("Writing credential placeholders...");
+	const placeholderNote = [
+		"# Sentinel Credential Placeholders",
+		"",
+		"OpenClaw uses SENTINEL_PLACEHOLDER_* tokens instead of real credentials.",
+		"The egress proxy on the executor replaces these with vault values at runtime.",
+		"",
+		"## Format",
+		"",
+		"SENTINEL_PLACEHOLDER_{SERVICE_ID}__{FIELD_NAME}",
+		"",
+		"Double-underscore (__) separates service ID from field name.",
+		"Service ID is alphanumeric only (no underscores); field may contain underscores.",
+		"",
+		"## Configured Placeholders",
+		"",
+		"### Telegram",
+		"- Bot token: SENTINEL_PLACEHOLDER_TELEGRAM__BOT_TOKEN",
+		'  Store real value: sentinel vault set telegram \'{"BOT_TOKEN": "your-token"}\'',
+		"",
+		"Add domain binding in vault metadata for each service.",
+	].join("\n");
+	writeFileSync(join(workspaceDir, "CREDENTIALS.md"), placeholderNote);
+	spin.stop("Credential placeholders documented");
 
 	// Step 8: Update Sentinel config
 	spin.start("Updating Sentinel configuration...");
@@ -200,10 +262,11 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 			`Executor URL: ${executorUrl}`,
 			`Sensitivity Tier: ${tier}`,
 			`Plugin Dir: ${PLUGIN_DIR}`,
-			`SOUL.md: ${join(OPENCLAW_CONFIG_DIR, "SOUL.md")}`,
+			`SOUL.md: ${join(workspaceDir, "SOUL.md")}`,
+			`Credentials: ${join(workspaceDir, "CREDENTIALS.md")}`,
 			"",
 			"Next steps:",
-			"  1. Start the executor: docker compose up executor -d",
+			"  1. Start the executor: sentinel start",
 			"  2. Start OpenClaw: openclaw gateway",
 			"  3. Verify: curl http://localhost:3141/health",
 		].join("\n"),

@@ -21,16 +21,23 @@ export function createAuthMiddleware(configuredToken: string | undefined) {
 		}
 
 		const authHeader = c.req.header("Authorization");
-		if (!authHeader) {
+		const apiKeyHeader = c.req.header("x-api-key");
+
+		let providedToken: string | undefined;
+		if (authHeader) {
+			const match = authHeader.match(/^Bearer\s+(\S+)$/);
+			if (!match) {
+				return c.json({ error: "Invalid authorization format" }, 401);
+			}
+			providedToken = match[1];
+		} else if (apiKeyHeader) {
+			// Support x-api-key header (used by Anthropic SDK and OpenClaw)
+			providedToken = apiKeyHeader;
+		}
+
+		if (!providedToken) {
 			return c.json({ error: "Authorization required" }, 401);
 		}
-
-		const match = authHeader.match(/^Bearer\s+(\S+)$/);
-		if (!match) {
-			return c.json({ error: "Invalid authorization format" }, 401);
-		}
-
-		const providedToken = match[1];
 
 		// Use SHA-256 hash to ensure equal length for timingSafeEqual
 		const providedHash = createHash("sha256").update(providedToken).digest();

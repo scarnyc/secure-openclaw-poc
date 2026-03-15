@@ -1,0 +1,31 @@
+{
+	"id": "sentinel",
+	"name": "@sentinel/openclaw-plugin",
+	"version": "0.1.0",
+	"description": "Sentinel security runtime — classification, confirmation, credential isolation, and audit for OpenClaw agents",
+	"entrypoint": "./dist/register.js",
+	"configSchema": {
+		"executorUrl": {
+			"type": "string",
+			"description": "URL of the Sentinel executor (e.g., http://executor:3141)",
+			"default": "http://localhost:3141"
+		},
+		"authToken": {
+			"type": "string",
+			"description": "Bearer token for executor authentication",
+			"optional": true
+		},
+		"failMode": {
+			"type": "string",
+			"enum": ["closed", "open"],
+			"description": "Behavior when executor is unreachable. 'closed' blocks all tool calls (recommended).",
+			"default": "closed"
+		},
+		"tier": {
+			"type": "string",
+			"enum": ["Normal", "High", "Critical"],
+			"description": "Sensitivity tier controlling rate limits and confirmation requirements",
+			"default": "Normal"
+		}
+	}
+}

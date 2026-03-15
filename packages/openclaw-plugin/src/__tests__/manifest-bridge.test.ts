@@ -17,9 +17,7 @@ describe("buildManifest", () => {
 
 	it("generates UUID for manifest id", () => {
 		const manifest = buildManifest("bash", { command: "ls" }, "run-1", SESSION);
-		expect(manifest.id).toMatch(
-			/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
-		);
+		expect(manifest.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
 	});
 
 	it("generates ISO timestamp", () => {

@@ -1,6 +1,14 @@
 import type { ClassifyResponse, FilterOutputResponse } from "@sentinel/types";
 import type { PluginConfig } from "./config.js";
 
+/** Response from /confirm-only — extends ClassifyResponse with TUI confirmation outcomes. */
+export interface ConfirmOnlyResponse {
+	decision: "auto_approve" | "confirm" | "block" | "approved" | "denied";
+	category?: string;
+	reason?: string;
+	manifestId: string;
+}
+
 export interface ExecutorClientOptions {
 	executorUrl: string;
 	authToken?: string;
@@ -51,6 +59,17 @@ export class ExecutorClient {
 	async execute(manifest: Record<string, unknown>): Promise<Record<string, unknown>> {
 		const res = await this.post("/execute", manifest);
 		return (await res.json()) as Record<string, unknown>;
+	}
+
+	async confirmOnly(
+		tool: string,
+		params: Record<string, unknown>,
+		agentId: string,
+		sessionId: string,
+	): Promise<ConfirmOnlyResponse> {
+		const body = { tool, params, agentId, sessionId, source: "openclaw" as const };
+		const res = await this.post("/confirm-only", body);
+		return (await res.json()) as ConfirmOnlyResponse;
 	}
 
 	async health(): Promise<boolean> {

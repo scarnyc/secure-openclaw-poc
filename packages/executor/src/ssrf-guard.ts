@@ -120,10 +120,23 @@ export async function checkSsrf(url: string): Promise<SsrfResult> {
 		return { resolvedIps: [bare], hostname: bare };
 	}
 
-	// Resolve DNS and check all returned IPs
+	// Resolve DNS and check all returned IPs.
+	// Wrap each resolution in a 5s timeout to prevent indefinite hangs in Docker DNS.
 	const allIps: string[] = [];
 
-	const [v4Result, v6Result] = await Promise.allSettled([dns.resolve4(bare), dns.resolve6(bare)]);
+	const withTimeout = <T>(promise: Promise<T>, ms: number): Promise<T> =>
+		Promise.race([
+			promise,
+			new Promise<never>((_, reject) =>
+				setTimeout(() => reject(new Error(`DNS timeout after ${ms}ms`)), ms),
+			),
+		]);
+
+	const DNS_TIMEOUT_MS = 5_000;
+	const [v4Result, v6Result] = await Promise.allSettled([
+		withTimeout(dns.resolve4(bare), DNS_TIMEOUT_MS),
+		withTimeout(dns.resolve6(bare), DNS_TIMEOUT_MS),
+	]);
 
 	if (v4Result.status === "fulfilled") {
 		allIps.push(...v4Result.value);
@@ -133,7 +146,10 @@ export async function checkSsrf(url: string): Promise<SsrfResult> {
 	}
 
 	if (allIps.length === 0) {
-		throw new SsrfError(`DNS resolution failed for hostname: ${bare}`);
+		const reasons: string[] = [];
+		if (v4Result.status === "rejected") reasons.push(`v4: ${v4Result.reason}`);
+		if (v6Result.status === "rejected") reasons.push(`v6: ${v6Result.reason}`);
+		throw new SsrfError(`DNS resolution failed for hostname: ${bare} (${reasons.join("; ")})`);
 	}
 
 	for (const ip of allIps) {

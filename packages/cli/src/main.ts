@@ -2,15 +2,19 @@
 
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type SentinelConfig, SentinelConfigSchema } from "@sentinel/types";
 import { auditCommand } from "./commands/audit.js";
 import { chatCommand } from "./commands/chat.js";
 import { initCommand } from "./commands/init.js";
 import { setupOpenclawCommand } from "./commands/setup-openclaw.js";
+import { startCommand, stopCommand } from "./commands/start.js";
 import { vaultCommand } from "./commands/vault.js";
 
-const DATA_DIR = resolve(process.cwd(), "data");
+// Resolve project root (3 levels up from packages/cli/src/ or packages/cli/dist/)
+const PROJECT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+const DATA_DIR = resolve(PROJECT_ROOT, "data");
 const CONFIG_PATH = resolve(DATA_DIR, "sentinel.json");
 
 async function loadConfig(): Promise<SentinelConfig> {
@@ -28,6 +32,16 @@ async function main(): Promise<void> {
 
 	if (command === "setup" && args[0] === "openclaw") {
 		await setupOpenclawCommand(DATA_DIR);
+		return;
+	}
+
+	if (command === "start") {
+		await startCommand(PROJECT_ROOT, args);
+		return;
+	}
+
+	if (command === "stop") {
+		await stopCommand(PROJECT_ROOT);
 		return;
 	}
 
@@ -57,6 +71,8 @@ async function main(): Promise<void> {
 
 Usage:
   sentinel init              First-time setup (master password, API key)
+  sentinel start [services]  Build, start Docker, wait for healthy (default: executor + openclaw-gateway)
+  sentinel stop              Stop all Docker services
   sentinel chat              Start interactive agent session
   sentinel vault <cmd>       Manage credentials (list, add, remove)
   sentinel audit [N]         View recent audit log entries (default: 20)

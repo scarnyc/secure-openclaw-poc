@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { sign as ed25519Sign, verify as ed25519Verify, generateKeyPair } from "@sentinel/crypto";
 import type { AuditEntry } from "@sentinel/types";
 import Database from "better-sqlite3";
@@ -305,10 +307,6 @@ export class AuditLogger {
 	// SENTINEL: auto-generate Ed25519 keypair when no explicit signingKey provided.
 	// Key stored in separate file (not in audit DB) to prevent co-location with signed data.
 	private loadOrGenerateSigningKey(db: Database.Database): Buffer {
-		const { existsSync, readFileSync, writeFileSync } =
-			require("node:fs") as typeof import("node:fs");
-		const { dirname, join } = require("node:path") as typeof import("node:path");
-
 		// Key file lives alongside the audit DB but is a separate file
 		const dbPath = (db as unknown as { name: string }).name;
 		const keyDir = dirname(dbPath);

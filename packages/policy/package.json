@@ -12,13 +12,14 @@
 		}
 	},
 	"scripts": {
-		"build": "tsup src/index.ts --format esm --dts",
+		"build": "tsc --build && tsup src/index.ts --format esm --external better-sqlite3",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage"
 	},
 	"dependencies": {
-		"@sentinel/types": "workspace:*"
+		"@sentinel/types": "workspace:*",
+		"better-sqlite3": "^11.8.0"
 	},
 	"devDependencies": {
 		"tsup": "^8.4.0",

@@ -7,8 +7,18 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 **Next Steps**:
 1. Context budget enforcement: per-result 30% cap, global 75% cap
 2. Tool recursion depth limiting: max depth 5 for agent-to-agent calls
+3. OpenClaw post-install: configure Brave Search provider (`openclaw configure --section model`), configure embedding provider for memory search, run `openclaw security audit --deep`
 **Roadmap**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 **Wave spec**: `docs/superpowers/specs/2026-03-10-phase-2-waves-design.md`
+4. Set Anthropic and Gemini API keys to work with Plano
+Optional follow-up (separate commit) | The config only has sentinel-openai provider routing through the proxy. There's no sentinel-anthropic or sentinel-gemini provider. The Anthropic auth profile uses direct `mode: "token"` — which means Anthropic API calls would bypass Sentinel's proxy. This may be intentional if you're only using GPT-5.4 for now, but worth noting for later.
+5. Update TIER_CONSTRAINTS strings in setup-openclaw.ts to match the new conversational tone (currently they read like policy docs too)
+6. Update the inline fallback template at setup-openclaw.ts:165-171 (only fires if template file missing)
+7. Update ExecutorClient to add confirmOnly() method for /confirm-only endpoint
+8. Wire register.ts into openclaw-plugin index.ts exports
+9. Set up sentinel memory plugin
+10. Fix set-up and create guide to make it more intuitive and user friendly
+11. use ag-ui protocol for all UI approve / rejects
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
 
@@ -36,8 +46,10 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 | `pnpm format` | `biome format --write .` |
 | `pnpm format:check` | `biome format .` |
 | `pnpm --filter @sentinel/<pkg> test` | Test a single package |
-| `docker compose up` | Start executor + agent in Docker |
-| `docker compose up executor` | Executor only |
+| `sentinel start` | Build, start Docker, wait for healthy (executor only) |
+| `sentinel start executor agent` | Start specific services |
+| `sentinel stop` | Stop all Docker services |
+| `docker compose up` | Start executor + agent in Docker (manual) |
 
 
 ## Getting Started
@@ -45,27 +57,26 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 ```bash
 git clone <this-repo> && cd secure-openclaw
 pnpm install
-# API key stored in encrypted vault via `sentinel init`, not env vars
+pnpm build        # tsc --build + tsup for all packages
+pnpm typecheck    # Verify TypeScript
+sentinel init     # First-time: set master password, store API key (interactive TUI)
+sentinel start    # Build Docker, start executor, wait for healthy
 ```
 
-
-## Local Development
+**`sentinel` CLI** — run via `node packages/cli/dist/main.js <command>` or `pnpm --filter @sentinel/cli exec sentinel <command>`.
 
 ### Prerequisites
 - Node.js 18+
 - pnpm 9+
+- Docker Desktop (required for production deployment)
+- Rust toolchain (`rustup` or `brew install rust`) — for `crypto-native` package
 
-### Setup
+### Running
 ```bash
-pnpm install
-pnpm typecheck   # Verify TypeScript
-pnpm test         # Run all tests (1100+)
-```
-
-### Running locally
-```bash
-sentinel init     # First-time: set master password, store API keys
-sentinel chat     # Start interactive agent session with TUI confirmation
+sentinel start              # Build + start executor in Docker, wait for healthy
+sentinel start executor agent  # Start specific services
+sentinel stop               # Tear down all Docker services
+sentinel chat               # Start interactive agent session with TUI confirmation
 ```
 
 ### Environment
@@ -103,9 +114,10 @@ sentinel chat     # Start interactive agent session with TUI confirmation
 │  - Tool call generation  │        │  - Confirmation routing       │
 │  - Context management    │        │  - Audit logging (SQLite)     │
 │                          │        │  - LLM proxy (/proxy/llm/*)  │
-│  NO credentials          │        │  - Content moderation         │
-│  NO direct tool exec     │        │  - MCP tool proxy             │
-│  NO direct internet      │        │  Decrypts creds at exec time  │
+│  NO credentials          │        │  - Egress proxy (/proxy/egress) │
+│  NO direct tool exec     │        │  - Content moderation         │
+│  NO direct internet      │        │  - MCP tool proxy             │
+│                          │        │  Decrypts creds at exec time  │
 └─────────────────────────┘         └──────────────────────────────┘
          │ LLM calls via                      │         │
          │ /proxy/llm/*                       │    ┌────▼─────────────┐
@@ -121,7 +133,7 @@ sentinel chat     # Start interactive agent session with TUI confirmation
                           └─────────────────────┘
 ```
 
-Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. OpenClaw agents use `/classify` (classification-only) and `/filter-output` (credential/PII scrubbing) endpoints via the `@sentinel/openclaw-plugin` package. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. Confirmation TUI runs on host (trust anchor), never inside Docker.
+Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. OpenClaw agents use `/classify` (classification-only) and `/filter-output` (credential/PII scrubbing) endpoints via the `@sentinel/openclaw-plugin` package. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. External API calls (Telegram, etc.) are proxied through executor's `/proxy/egress` endpoint, which injects domain-scoped credentials from the vault and applies SSRF protection. Confirmation TUI runs on host (trust anchor), never inside Docker.
 
 ### OpenClaw Parallel Agent Model
 
@@ -212,8 +224,7 @@ Four categories with graduated confirmation: `read` (auto-approve configurable),
 
 ### Bash Sandboxing
 - **Interpreter inline-exec** (`python3 -c`, `node -e`, etc.) classified as "dangerous" — always requires confirmation
-- **firejail** wrapping when `SENTINEL_BASH_SANDBOX=firejail` — `--net=none --private` for defense-in-depth
-- firejail is Linux-only; local Mac dev falls back to unsandboxed execution
+- firejail not available in Alpine repos — Docker container hardening (`read_only`, `cap_drop: ALL`, `no-new-privileges`) provides defense-in-depth instead
 
 ### Content Moderation
 - **Mode**: `SENTINEL_MODERATION_MODE=enforce|warn|off` (default: enforce in Docker, warn in local dev)
@@ -267,6 +278,8 @@ Details in `docs/plans/path-a-v2-adopt-openfang-primitives.md` and MEMORY.md eva
 | `SENTINEL_GWS_SHA256` | Container | SHA-256 hex digest for GWS binary verification (required in Docker) |
 | `SENTINEL_GWS_AGENT_SCOPES` | Container | JSON-encoded per-agent GWS scope map |
 | `SENTINEL_GWS_ACCOUNT_EMAIL` | Container | Expected Google account email for identity validation |
+| `SENTINEL_AUTH_TOKEN` | Container | Fixed auth token for executor API (auto-generated if unset in Docker) |
+| `SENTINEL_VAULT_PASSWORD` | Container | Master password for vault decryption (prompted by `sentinel start`) |
 
 API keys stored in encrypted vault via `sentinel init`. Local dev uses `.dev.vars` (see `.dev.vars.example`). **Never** commit `.dev.vars` with real values.
 
@@ -296,13 +309,13 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **better-sqlite3** — native module; needs node-gyp build tools (Python, make, C++ compiler)
 - **Sandbox blocks `.claude/` writes** — creating skills/agents may require disabling sandbox temporarily
 - **Biome v2 monorepo globs** — `!dist` only excludes top-level; use `!**/dist` for `packages/*/dist/`
-- **tsup `--dts` in Docker** — Fails with composite project references (TS6307); Dockerfile uses `tsc -b` instead
+- **tsup `--dts` breaks with composite project refs** — All packages use `tsc --build && tsup --format esm` (no `--dts`). Docker build cleans dist/ and uses `tsc -b` only
 - **Docker entrypoint** — `packages/executor/src/entrypoint.ts` is the container startup file; `server.ts` only exports `createApp`
 - **`noImplicitAnyLet`** — Biome catches `let x;` even when TS allows it; always annotate: `let x: Type;`
 - **Executor concurrency** — OpenClaw can spawn parallel agent instances; executor `:3141` must handle concurrent `/execute` POST requests with session-scoped isolation (no shared mutable state between requests)
 - **Docker `internal: true`** — agent container cannot reach internet; all LLM calls go through executor's `/proxy/llm/*` endpoint
 - **`ANTHROPIC_BASE_URL`** — must be set in agent container to `http://executor:3141/proxy/llm` to route through proxy
-- **firejail is Linux-only** — local Mac dev falls back to unsandboxed bash execution; firejail wrapping only active when `SENTINEL_BASH_SANDBOX=firejail`
+- **firejail not in Alpine** — removed from Dockerfile; container hardening (read_only, cap_drop ALL, no-new-privileges) provides equivalent defense-in-depth
 - **`SENTINEL_DOCKER=true`** — enables write-file path restriction to `/app/data/`; set in executor container env
 - **O_NOFOLLOW + realpath** — `open()` with `O_NOFOLLOW` must target the user-supplied path, not the realpath-resolved path (realpath already resolves symlinks, defeating the check); returns `ELOOP` on macOS, `EMLINK` on some Linux
 - **Archived plans** — `docs/plans/archived/` contains superseded Phase 1.5 design docs (TypeScript policy engine approach)
@@ -315,10 +328,19 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - **Entrypoint ordering** — `entrypoint.ts` must open vault BEFORE `createToolRegistry()` — registry captures vault via closure for GWS token injection
 - **Hono test client Content-Length** — Hono's test client doesn't always set Content-Length; body size middleware requiring it must be gated behind `SENTINEL_DOCKER=true`
 - **AuditLogger auto-key-gen** — constructor calls `loadOrGenerateSigningKey()`, so ALL entries are signed; tests must use `logger.getSigningPublicKey()` not random keys for verification
+- **better-sqlite3 in ESM** — native module uses `require()`; must be `--external` in tsup builds to avoid `Dynamic require of "fs" is not supported` error
+- **Node 22 vs 25 ESM strictness** — Node 22 (Docker Alpine) rejects `require()` mixed with top-level `await` (`ERR_AMBIGUOUS_MODULE_SYNTAX`); Node 25 (local) is permissive. Use ESM imports, not `require()`.
+- **Docker healthcheck** — BusyBox `wget` fails to connect when executor uses `--secure-heap`; use `node -e "fetch(...)"` instead
+- **Docker stale audit.db** — old `audit.db` from earlier phases may lack newer columns (e.g., `agent_id`); delete and let executor recreate
+- **CLI data path** — `sentinel init` writes to `data/` relative to project root (resolved via `import.meta.url`), not `process.cwd()`
+- **Executor entrypoint ignores `sentinel.json`** — `entrypoint.ts` uses `getDefaultConfig()` (hardcoded), not the config file; all runtime config must come via env vars (`SENTINEL_AUTH_TOKEN`, `SENTINEL_VAULT_PASSWORD`, `SENTINEL_AUDIT_PATH`, `SENTINEL_VAULT_PATH`)
+- **Anthropic OAuth banned for third-party apps** — OAuth tokens (`sk-ant-oat01-*`) rejected since Feb 2026; SDK also validates key format client-side (`sk-ant-api03-*` only); must use API key from console.anthropic.com (usage-based billing)
 - **Parallel wave contamination** — when multiple waves touch the same file, restore from main first (`git checkout <main-sha> -- <file>`) then apply only the current wave's fix
-- **Types `dist/` uses `tsc --build`** — tsup DTS fails with composite project refs; `pnpm build` in types only produces ESM bundle. For full dist (with per-file .js + .d.ts), run `tsc --build` from `packages/types/`. Delete `tsconfig.tsbuildinfo` for clean rebuild.
 - **Executor-client HTTP tests need sandbox disabled** — `node:http` createServer with `.listen()` triggers sandbox EPERM; prefer `vi.stubGlobal("fetch", mockFetch)` pattern (see `packages/agent/src/executor-client.test.ts`); only use `dangerouslyDisableSandbox: true` for tests that truly require real TLS handshakes
 - **`gwsDefaultDeny` in Docker** — `applyDockerDefaults()` sets `gwsDefaultDeny: true` automatically; agents without a GWS scope entry are **denied**, not warned. Non-Docker mode defaults to `false` (backward compat)
+- **Egress proxy HTTPS-only** — `/proxy/egress` rejects HTTP destinations to prevent plaintext credential transmission
+- **Placeholder cross-service rejection** — `SENTINEL_PLACEHOLDER_GITHUB_TOKEN` in a request to `api.telegram.org` (bound to service "telegram") is rejected, even if the "github" service exists in vault
+- **`openclaw gateway` in Docker** — runs on `sentinel-internal` only; all outbound traffic goes through executor's `/proxy/egress`; `npm install -g openclaw@latest` in Dockerfile stage
 
 
 ## Build Progress
@@ -339,6 +361,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 | Wave 2.3a: OpenClaw Plugin | 895 | — | `/classify` + `/filter-output` endpoints, `@sentinel/openclaw-plugin` package, `delegate.code` handler, delegation queue, `sentinel setup openclaw` CLI, heartbeat monitor, setup guide |
 | Wave 2.3b: E2E Integration Tests | 903 | — | Plugin ↔ executor pipeline, delegation lifecycle, shared audit sources, fail-closed health monitor, sanitizeOutput |
 | Wave 2.3c: GWS Security Guardrails | 1106 | — | Docker GWS defaults (G2), fail-closed plugin (G3), account email validation (G4), gwsDefaultDeny (G5), E2E injection test (G6), vault failure logging (G7), test mock refactoring (G8) |
+| Wave 2.4: Plugin Wiring + Egress Proxy | TBD | — | register.ts adapter, /confirm-only endpoint, egress proxy with credential injection, Docker gateway stage, setup-openclaw fixes |
 
 ### Backlog
 
@@ -355,6 +378,12 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - [ ] Posthog for app analytics: https://posthog.com/
 - [ ] Moltworkers CF deployment: (https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/) | (https://github.com/cloudflare/moltworker)
 - [ ] Paperclip: Open-source orchestration for zero-human companies | https://github.com/paperclipai/paperclip
+- [ ] Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates)
+- [ ] Execution result passthrough — plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
+- [ ] Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
+- [ ] OpenClaw memory isolation — separate memory systems (Phase 3)
+- [ ] Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
+- [ ] Plugin hot-reload — currently requires gateway restart
 
 ### References
 - See `docs/plans/path-a-v2-adopt-openfang-primitives.md` §Phase 2 for security gaps and agent roster.
@@ -366,3 +395,19 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - [Google's Approach for Secure AI Agents](https://research.google/pubs/an-introduction-to-googles-approach-for-secure-ai-agents/)
 - [Zero Trust Security](https://workspace.google.com/security/zero-trust/)
 - [Enterprise Security Controls for Gemini in Workspace](https://workspace.google.com/blog/ai-and-machine-learning/enterprise-security-controls-google-workspace-gemini)
+
+#### Notes from Mar. 15
+
+★ Insight from https://openai.com/index/equip-responses-api-computer-environment/───────────────────────────────
+OpenAI independently validated Sentinel's core architecture. Their "Equip" system (Responses API + Shell Tool + Container Runtime) is structurally the same two-process model we built: model proposes → platform executes → secrets never visible to model. Their "auth-translation sidecar" is functionally equivalent to our executor's useCredential() vault injection. Sentinel is actually ahead in several areas (encrypted vault vs env vars, Merkle audit chain vs simple logging, HITL confirmation vs none, zero-outbound-by-default vs allowlist).
+
+The real gap isn't architectural — it's operational. OpenClaw currently calls /classify for policy decisions but executes auto_approve tools itself, bypassing Sentinel's audit, credential filtering, SSRF protection, and PII scrubbing. OpenAI routes ALL commands through the platform — no bypass path exists. We need to match that.
+
+One good idea to steal: domain-scoped credential binding. OpenAI binds secrets to specific destination domains — the sidecar only injects a credential if the outbound request matches the credential's allowed domain. We have service-keyed vault entries but no egress domain binding.
+───────────────────────────────
+
+The plan identifies 3 priorities:
+
+Route ALL OpenClaw execution through Sentinel (critical — classification without enforcement is a firewall that logs but doesn't block)
+Domain-scoped credential binding (defense-in-depth from OpenAI's design)
+Execution result passthrough (make the plugin return Sentinel's filtered output as OpenClaw's tool result)

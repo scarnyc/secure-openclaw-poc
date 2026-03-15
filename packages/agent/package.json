@@ -12,7 +12,7 @@
 		}
 	},
 	"scripts": {
-		"build": "tsup src/index.ts src/loop.ts --format esm --dts",
+		"build": "tsc --build && tsup src/index.ts src/loop.ts --format esm",
 		"typecheck": "tsc --noEmit",
 		"test": "vitest run",
 		"dev": "tsx src/loop.ts"

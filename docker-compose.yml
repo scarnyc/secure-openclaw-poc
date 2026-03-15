@@ -12,8 +12,15 @@ services:
       - ./data:/app/data:rw
     environment:
       - SENTINEL_DOCKER=true
-      # SENTINEL: H2 — Enable firejail bash sandboxing in Docker
-      - SENTINEL_BASH_SANDBOX=firejail
+      - SENTINEL_AUTH_TOKEN=${SENTINEL_AUTH_TOKEN:-}
+      # Vault password — required for LLM proxy to inject API keys from encrypted vault
+      # Passed at runtime via `sentinel start` (prompts for password)
+      - SENTINEL_VAULT_PASSWORD=${SENTINEL_VAULT_PASSWORD:-}
+      # GWS binary SHA-256 — required in Docker mode for integrity verification
+      # Replace with real hash when GWS CLI is installed: sha256sum $(which gws)
+      - SENTINEL_GWS_SHA256=0000000000000000000000000000000000000000000000000000000000000000
+      # Egress proxy domain-scoped credential bindings (JSON array)
+      - SENTINEL_EGRESS_BINDINGS=${SENTINEL_EGRESS_BINDINGS:-[]}
     # SENTINEL: L6 — Container resource limits
     mem_limit: 512m
     cpus: "1.0"
@@ -33,7 +40,7 @@ services:
       - sentinel-internal
       - sentinel-external
     healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:3141/health"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3141/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 3
@@ -74,13 +81,17 @@ services:
   # Runs the OpenClaw plugin with Sentinel integration inside Docker.
   # For most deployments, OpenClaw runs on the host and connects to executor:3141.
   openclaw-gateway:
-    image: node:22-alpine
-    working_dir: /app
+    build:
+      context: .
+      target: openclaw-gateway
     volumes:
-      - ./packages/openclaw-plugin/dist:/app/plugin:ro
-      - ./data:/app/data:ro
+      # Writable volumes for OpenClaw state
+      - openclaw-workspace:/home/node/.openclaw/workspace:rw
+      - openclaw-agents:/home/node/.openclaw/agents:rw
+      - openclaw-logs:/home/node/.openclaw/logs:rw
     environment:
       - SENTINEL_EXECUTOR_URL=http://executor:3141
+      - SENTINEL_AUTH_TOKEN=${SENTINEL_AUTH_TOKEN:-}
       - SENTINEL_FAIL_MODE=closed
       - SENTINEL_DOCKER=true
       - NODE_ENV=production
@@ -95,6 +106,7 @@ services:
     cap_drop:
       - ALL
     networks:
+      # OFFLINE — only internal network, no direct internet access
       - sentinel-internal
     depends_on:
       executor:
@@ -122,3 +134,8 @@ networks:
     internal: true
   sentinel-external:
     driver: bridge
+
+volumes:
+  openclaw-workspace:
+  openclaw-agents:
+  openclaw-logs:

@@ -54,7 +54,15 @@ export class DelegationPoller {
 		}
 	}
 
-	private async fetchPending(): Promise<Array<{ id: string; task: string; allowedTools: string[]; maxBudgetUsd: number; worktreeName?: string }>> {
+	private async fetchPending(): Promise<
+		Array<{
+			id: string;
+			task: string;
+			allowedTools: string[];
+			maxBudgetUsd: number;
+			worktreeName?: string;
+		}>
+	> {
 		const headers: Record<string, string> = { "Content-Type": "application/json" };
 		if (this.options.authToken) {
 			headers.Authorization = `Bearer ${this.options.authToken}`;
@@ -65,7 +73,13 @@ export class DelegationPoller {
 		});
 
 		if (!res.ok) return [];
-		return (await res.json()) as Array<{ id: string; task: string; allowedTools: string[]; maxBudgetUsd: number; worktreeName?: string }>;
+		return (await res.json()) as Array<{
+			id: string;
+			task: string;
+			allowedTools: string[];
+			maxBudgetUsd: number;
+			worktreeName?: string;
+		}>;
 	}
 
 	private async spawnClaudeCode(delegation: {
@@ -76,9 +90,12 @@ export class DelegationPoller {
 		worktreeName?: string;
 	}): Promise<void> {
 		const args = [
-			"-p", delegation.task,
-			"--output-format", "json",
-			"--max-budget-usd", String(delegation.maxBudgetUsd),
+			"-p",
+			delegation.task,
+			"--output-format",
+			"json",
+			"--max-budget-usd",
+			String(delegation.maxBudgetUsd),
 		];
 
 		if (delegation.allowedTools.length > 0) {
