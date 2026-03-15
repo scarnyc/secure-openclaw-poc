@@ -33,6 +33,17 @@ describe("loadConfigFromEnv", () => {
 		expect(config.failMode).toBe("open");
 	});
 
+	it("defaults confirmationTimeoutMs to 330_000", () => {
+		const config = loadConfigFromEnv();
+		expect(config.confirmationTimeoutMs).toBe(330_000);
+	});
+
+	it("reads SENTINEL_CONFIRMATION_TIMEOUT_MS from env", () => {
+		vi.stubEnv("SENTINEL_CONFIRMATION_TIMEOUT_MS", "120000");
+		const config = loadConfigFromEnv();
+		expect(config.confirmationTimeoutMs).toBe(120_000);
+	});
+
 	it("keeps failMode='closed' in Docker mode without override", () => {
 		const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 		vi.stubEnv("SENTINEL_DOCKER", "true");

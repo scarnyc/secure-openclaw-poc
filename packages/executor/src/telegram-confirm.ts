@@ -4,6 +4,8 @@ import { redactAll } from "@sentinel/types";
 const PARAM_TRUNCATE_LIMIT = 200;
 const POLL_TIMEOUT_SECONDS = 30;
 const POLL_ERROR_DELAY_MS = 5_000;
+/** Longer backoff for 409 conflicts — gives competing session time to release */
+const POLL_CONFLICT_DELAY_MS = 15_000;
 /** Stop polling after this many consecutive errors (permanent failure assumed) */
 const MAX_CONSECUTIVE_ERRORS = 10;
 /** Telegram limits callback_data to 64 bytes */
@@ -198,6 +200,18 @@ export class TelegramConfirmAdapter {
 	}
 
 	private async pollLoop(): Promise<void> {
+		// SENTINEL: Clear any active webhook AND kick off stale getUpdates connections.
+		// Telegram rejects getUpdates with 409 Conflict if another session is polling.
+		// drop_pending_updates: true forces Telegram to close old connections.
+		try {
+			await this.telegramApi("deleteWebhook", { drop_pending_updates: true });
+			console.log("[telegram] deleteWebhook OK — cleared stale connections");
+		} catch (err) {
+			console.warn(
+				`[telegram] deleteWebhook failed (polling may 409): ${err instanceof Error ? err.message : "Unknown"}`,
+			);
+		}
+
 		let consecutiveErrors = 0;
 
 		while (this.running) {
@@ -223,20 +237,26 @@ export class TelegramConfirmAdapter {
 			} catch (err) {
 				if (!this.running) return;
 				consecutiveErrors++;
+				const msg = err instanceof Error ? err.message : "Unknown";
+				const is409 = msg.includes("409");
 				console.error(
-					`[telegram] Poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${err instanceof Error ? err.message : "Unknown"}`,
+					`[telegram] Poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${msg}`,
 				);
 
 				// SENTINEL: Finding 4 — stop after N consecutive failures (permanent error assumed)
 				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+					const hint = is409
+						? "Another bot instance may be using the same token. Check for duplicate deployments."
+						: "Check TELEGRAM vault credentials and network connectivity.";
 					console.error(
-						`[telegram] FATAL: ${consecutiveErrors} consecutive poll failures — stopping adapter. Check TELEGRAM vault credentials and network connectivity.`,
+						`[telegram] FATAL: ${consecutiveErrors} consecutive poll failures — stopping adapter. ${hint}`,
 					);
 					this.running = false;
 					return;
 				}
 
-				await sleep(POLL_ERROR_DELAY_MS);
+				// 409 = competing getUpdates session; use longer backoff to let it expire
+				await sleep(is409 ? POLL_CONFLICT_DELAY_MS : POLL_ERROR_DELAY_MS);
 			}
 		}
 	}
