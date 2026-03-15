@@ -180,7 +180,7 @@ export class TelegramConfirmAdapter {
 
 	private async telegramApi(method: string, body: object): Promise<unknown> {
 		const { useCredential } = await import("@sentinel/crypto");
-		return useCredential(this.vault, "TELEGRAM", ["key"] as const, async (cred) => {
+		return useCredential(this.vault, "telegram", ["key"] as const, async (cred) => {
 			const res = await fetch(`https://api.telegram.org/bot${cred.key}/${method}`, {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },

@@ -94,7 +94,7 @@ if (egressBindingsRaw) {
 }
 
 // SENTINEL: Telegram confirmation adapter — sends confirmation prompts via Telegram bot
-// Vault entries: "TELEGRAM" (bot token as {"key": "<token>"}), "TELEGRAM_CHAT" (chat ID as {"key": "<id>"})
+// Vault entries: "telegram" (bot token as {"key": "<token>"}), "telegram_chat" (chat ID as {"key": "<id>"})
 // Both stored via `sentinel vault add`. Falls back to SENTINEL_TELEGRAM_CHAT_ID env var for chat ID.
 let telegramAdapter: TelegramConfirmAdapter | undefined;
 if (vault) {
