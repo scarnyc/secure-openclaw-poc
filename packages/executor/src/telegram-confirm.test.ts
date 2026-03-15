@@ -41,6 +41,13 @@ function makeGetUpdatesResponse(updates: unknown[]) {
 	});
 }
 
+function makeErrorResponse(status: number, description: string) {
+	return new Response(JSON.stringify({ ok: false, description }), {
+		status,
+		headers: { "content-type": "application/json" },
+	});
+}
+
 function baseRequest(overrides?: Partial<TelegramConfirmRequest>): TelegramConfirmRequest {
 	return {
 		manifestId: "test-manifest-1",
@@ -54,8 +61,7 @@ function baseRequest(overrides?: Partial<TelegramConfirmRequest>): TelegramConfi
 
 /**
  * Create a mock fetch for poll loop tests that returns updates once,
- * then stops the adapter to prevent infinite tight loops (the poll loop
- * has no delay between successful empty responses).
+ * then stops the adapter to prevent infinite tight loops.
  */
 function createPollMockFetch(
 	adapter: TelegramConfirmAdapter,
@@ -129,7 +135,6 @@ describe("TelegramConfirmAdapter", () => {
 			const allKeys = [...keys, ...proto];
 			expect(allKeys).not.toContain("botToken");
 			expect(allKeys).not.toContain("token");
-			// Also check no property value contains the token
 			for (const key of keys) {
 				expect((adapter as unknown as Record<string, unknown>)[key]).not.toBe("test-bot-token");
 			}
@@ -214,15 +219,83 @@ describe("TelegramConfirmAdapter", () => {
 			const text = body.text as string;
 			expect(text).not.toContain("CANNOT BE UNDONE");
 		});
+
+		it("rejects manifestId containing colons", async () => {
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			await expect(
+				adapter.sendConfirmation(baseRequest({ manifestId: "evil:reject" })),
+			).rejects.toThrow("manifestId contains colon");
+		});
+
+		it("rejects manifestId that would exceed Telegram 64-byte callback_data limit", async () => {
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const longId = "a".repeat(60); // confirm: (8) + 60 + :approve (8) = 76 > 64
+			await expect(adapter.sendConfirmation(baseRequest({ manifestId: longId }))).rejects.toThrow(
+				"64-byte limit",
+			);
+		});
+
+		it("propagates Telegram API errors (non-200)", async () => {
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue(makeErrorResponse(500, "Internal Server Error")),
+			);
+
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			await expect(adapter.sendConfirmation(baseRequest())).rejects.toThrow(
+				"Telegram sendMessage: 500",
+			);
+		});
+
+		it("propagates Telegram API errors (ok: false)", async () => {
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue(
+					new Response(
+						JSON.stringify({ ok: false, description: "Bad Request: can't parse entities" }),
+						{
+							status: 200,
+							headers: { "content-type": "application/json" },
+						},
+					),
+				),
+			);
+
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			await expect(adapter.sendConfirmation(baseRequest())).rejects.toThrow("can't parse entities");
+		});
+
+		it("logs warning when message_id is absent from response", async () => {
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockResolvedValue(
+					new Response(JSON.stringify({ ok: true, result: true }), {
+						status: 200,
+						headers: { "content-type": "application/json" },
+					}),
+				),
+			);
+
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const result = await adapter.sendConfirmation(baseRequest());
+
+			expect(result).toBeUndefined();
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("no message_id returned"));
+			warnSpy.mockRestore();
+		});
 	});
 
 	describe("parameter truncation", () => {
 		it("truncates parameter values longer than 200 chars", () => {
-			// Use mixed content to avoid regex backtracking in redaction patterns
 			const longValue = "The quick brown fox jumps over the lazy dog. ".repeat(10);
 			expect(longValue.length).toBeGreaterThan(200);
 			const formatted = _formatParamValue(longValue);
-			// After redaction + truncation + escaping, the raw content is capped at 200 + "..."
 			expect(formatted).toContain("\\.\\.\\.");
 		});
 
@@ -245,6 +318,13 @@ describe("TelegramConfirmAdapter", () => {
 		it("redacts OpenAI keys in parameter values", () => {
 			const fakeKey = ["sk", "proj", "abc123def456ghi789jklmnopqrst01234567890ABCDEF"].join("-");
 			const formatted = _formatParamValue(`token=${fakeKey}`);
+			expect(formatted).toContain("REDACTED");
+		});
+
+		it("redacts Telegram bot tokens in parameter values", () => {
+			// Telegram tokens: numeric_id:alphanumeric_secret (35 chars)
+			const fakeToken = `12345678:${"A".repeat(35)}`;
+			const formatted = _formatParamValue(fakeToken);
 			expect(formatted).toContain("REDACTED");
 		});
 	});
@@ -310,23 +390,32 @@ describe("TelegramConfirmAdapter", () => {
 			adapter.stop();
 		});
 
-		it("rejects callback from wrong chat_id with warning", async () => {
+		it("rejects callback from wrong chat_id with warning and answers callback", async () => {
 			const resolver = vi.fn().mockReturnValue(true);
 			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 			const vault = createMockVault();
 			const adapter = new TelegramConfirmAdapter(vault, "555");
 			adapter.bindResolver(resolver);
 
-			const { mockFetch, callCounts } = createPollMockFetch(adapter, [
+			let answerBody: Record<string, unknown> | undefined;
+			const { mockFetch, callCounts } = createPollMockFetch(
+				adapter,
+				[
+					{
+						update_id: 300,
+						callback_query: {
+							id: "cb-3",
+							data: "confirm:manifest-bad:approve",
+							message: { chat: { id: 999 }, message_id: 12 },
+						},
+					},
+				],
 				{
-					update_id: 300,
-					callback_query: {
-						id: "cb-3",
-						data: "confirm:manifest-bad:approve",
-						message: { chat: { id: 999 }, message_id: 12 },
+					onAnswer: (body) => {
+						answerBody = body;
 					},
 				},
-			]);
+			);
 			vi.stubGlobal("fetch", mockFetch);
 
 			adapter.start();
@@ -340,6 +429,9 @@ describe("TelegramConfirmAdapter", () => {
 
 			expect(resolver).not.toHaveBeenCalled();
 			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("unauthorized chat 999"));
+			// SENTINEL: Verify unauthorized callbacks are answered (Finding 7)
+			expect(callCounts.answerCallback).toBeGreaterThanOrEqual(1);
+			expect(answerBody?.text).toBe("Unauthorized");
 
 			adapter.stop();
 			warnSpy.mockRestore();
@@ -396,6 +488,119 @@ describe("TelegramConfirmAdapter", () => {
 			adapter.stop();
 			warnSpy.mockRestore();
 		});
+
+		it("logs malformed confirm: callback data instead of silently dropping", async () => {
+			const resolver = vi.fn().mockReturnValue(true);
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "555");
+			adapter.bindResolver(resolver);
+
+			const { mockFetch, callCounts } = createPollMockFetch(adapter, [
+				{
+					update_id: 500,
+					callback_query: {
+						id: "cb-5",
+						data: "confirm:id:approve:extra", // 4 parts — malformed
+						message: { chat: { id: 555 }, message_id: 14 },
+					},
+				},
+			]);
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+
+			await vi.waitFor(
+				() => {
+					expect(callCounts.getUpdates).toBeGreaterThanOrEqual(2);
+				},
+				{ timeout: 2000 },
+			);
+
+			expect(resolver).not.toHaveBeenCalled();
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("Malformed callback data"));
+
+			adapter.stop();
+			warnSpy.mockRestore();
+		});
+
+		it("logs unknown action in callback data", async () => {
+			const resolver = vi.fn().mockReturnValue(true);
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "555");
+			adapter.bindResolver(resolver);
+
+			const { mockFetch, callCounts } = createPollMockFetch(adapter, [
+				{
+					update_id: 600,
+					callback_query: {
+						id: "cb-6",
+						data: "confirm:some-id:explode", // unknown action
+						message: { chat: { id: 555 }, message_id: 15 },
+					},
+				},
+			]);
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+
+			await vi.waitFor(
+				() => {
+					expect(callCounts.getUpdates).toBeGreaterThanOrEqual(2);
+				},
+				{ timeout: 2000 },
+			);
+
+			expect(resolver).not.toHaveBeenCalled();
+			expect(warnSpy).toHaveBeenCalledWith(
+				expect.stringContaining("Unknown action in callback: explode"),
+			);
+
+			adapter.stop();
+			warnSpy.mockRestore();
+		});
+
+		it("silently ignores non-confirm callback data", async () => {
+			const resolver = vi.fn().mockReturnValue(true);
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "555");
+			adapter.bindResolver(resolver);
+
+			const { mockFetch, callCounts } = createPollMockFetch(adapter, [
+				{
+					update_id: 700,
+					callback_query: {
+						id: "cb-7",
+						data: "other:something",
+						message: { chat: { id: 555 }, message_id: 16 },
+					},
+				},
+			]);
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+
+			await vi.waitFor(
+				() => {
+					expect(callCounts.getUpdates).toBeGreaterThanOrEqual(2);
+				},
+				{ timeout: 2000 },
+			);
+
+			expect(resolver).not.toHaveBeenCalled();
+			// Should NOT warn for non-confirm data — it's expected
+			const malformedCalls = warnSpy.mock.calls.filter(
+				(call) =>
+					typeof call[0] === "string" &&
+					(call[0].includes("Malformed") || call[0].includes("Unknown action")),
+			);
+			expect(malformedCalls).toHaveLength(0);
+
+			adapter.stop();
+			warnSpy.mockRestore();
+		});
 	});
 
 	describe("stop()", () => {
@@ -404,12 +609,10 @@ describe("TelegramConfirmAdapter", () => {
 			const vault = createMockVault();
 			const adapter = new TelegramConfirmAdapter(vault, "123");
 
-			// This mock does NOT auto-stop — we test that stop() halts the loop
 			const mockFetch = vi.fn().mockImplementation((url: string) => {
 				if (typeof url === "string" && url.includes("getUpdates")) {
 					callCount++;
 					if (callCount >= 2) {
-						// Stop after 2 polls to prevent OOM
 						adapter.stop();
 					}
 					return Promise.resolve(makeGetUpdatesResponse([]));
@@ -427,10 +630,87 @@ describe("TelegramConfirmAdapter", () => {
 				{ timeout: 2000 },
 			);
 
-			// Wait a bit — count should not increase after stop
 			const countAtStop = callCount;
 			await new Promise((r) => setTimeout(r, 50));
 			expect(callCount).toBeLessThanOrEqual(countAtStop + 1);
+		});
+	});
+
+	describe("start() idempotency", () => {
+		it("calling start() twice does not spawn two poll loops", async () => {
+			let callCount = 0;
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+
+			const mockFetch = vi.fn().mockImplementation((url: string) => {
+				if (typeof url === "string" && url.includes("getUpdates")) {
+					callCount++;
+					if (callCount >= 3) {
+						adapter.stop();
+					}
+					return Promise.resolve(makeGetUpdatesResponse([]));
+				}
+				return Promise.resolve(new Response("not found", { status: 404 }));
+			});
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+			adapter.start(); // Second call should be no-op
+
+			await vi.waitFor(
+				() => {
+					expect(callCount).toBeGreaterThanOrEqual(3);
+				},
+				{ timeout: 2000 },
+			);
+
+			// If two loops ran, we'd see ~6 calls; with one loop, ~3
+			expect(callCount).toBeLessThanOrEqual(5);
+		});
+	});
+
+	describe("poll loop error handling", () => {
+		it("stops after MAX_CONSECUTIVE_ERRORS and resets running flag", async () => {
+			vi.useFakeTimers();
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+			// Mock fetch to always fail — simulates permanent error (401 Unauthorized)
+			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeErrorResponse(401, "Unauthorized")));
+
+			adapter.start();
+
+			// Advance timers to drain 10 error cycles (5s delay each)
+			for (let i = 0; i < 12; i++) {
+				await vi.advanceTimersByTimeAsync(5_100);
+			}
+
+			expect(errorSpy).toHaveBeenCalledWith(
+				expect.stringContaining("FATAL: 10 consecutive poll failures"),
+			);
+
+			// After fatal, start() should be callable again (running was reset)
+			let secondStartCalled = false;
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation((url: string) => {
+					if (typeof url === "string" && url.includes("getUpdates")) {
+						secondStartCalled = true;
+						adapter.stop();
+						return Promise.resolve(makeGetUpdatesResponse([]));
+					}
+					return Promise.resolve(new Response("not found", { status: 404 }));
+				}),
+			);
+
+			adapter.start(); // Should work again since running was reset
+			await vi.advanceTimersByTimeAsync(100);
+
+			expect(secondStartCalled).toBe(true);
+
+			vi.useRealTimers();
+			errorSpy.mockRestore();
 		});
 	});
 
@@ -459,7 +739,6 @@ describe("TelegramConfirmAdapter", () => {
 
 			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
 			const text = body.text as string;
-			// Recipients should be expanded individually
 			expect(text).toContain("alice@example\\.com");
 			expect(text).toContain("bob@example\\.com");
 			expect(text).toContain("carol@example\\.com");
@@ -504,7 +783,6 @@ describe("TelegramConfirmAdapter", () => {
 
 		it("formatParamValue handles objects by JSON-serializing", () => {
 			const result = _formatParamValue({ key: "value" });
-			// Should contain the key and value in escaped form
 			expect(result).toContain("key");
 			expect(result).toContain("value");
 		});

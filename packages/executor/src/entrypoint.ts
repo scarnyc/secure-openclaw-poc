@@ -96,13 +96,19 @@ if (egressBindingsRaw) {
 // SENTINEL: Telegram confirmation adapter — sends confirmation prompts via Telegram bot
 let telegramAdapter: TelegramConfirmAdapter | undefined;
 const telegramChatId = process.env.SENTINEL_TELEGRAM_CHAT_ID;
-if (telegramChatId && vault) {
+if (telegramChatId && !vault) {
+	// SENTINEL: Finding 9 — log when Telegram is skipped due to missing vault
+	console.warn(
+		"[sentinel] SENTINEL_TELEGRAM_CHAT_ID is set but vault is unavailable — Telegram confirmations disabled",
+	);
+} else if (telegramChatId && vault) {
 	try {
 		// Adapter is passed to createApp, which calls bindResolver() to wire pendingConfirmations
 		telegramAdapter = new TelegramConfirmAdapter(vault, telegramChatId);
 	} catch (err) {
 		console.error(
-			`[sentinel] Failed to create Telegram adapter: ${err instanceof Error ? err.message : "Unknown"}`,
+			`[sentinel] Failed to create Telegram adapter — confirmations will only be available via HTTP /confirm endpoint. ` +
+				`Error: ${err instanceof Error ? err.message : "Unknown"}`,
 		);
 	}
 }
@@ -123,8 +129,9 @@ const host = "0.0.0.0";
 
 serve({ fetch: app.fetch, port, hostname: host }, () => {
 	console.log(`Sentinel Executor listening on http://${host}:${port}`);
-	if (telegramAdapter) {
+	if (telegramAdapter && telegramChatId) {
 		telegramAdapter.start();
-		console.log(`[sentinel] Telegram confirmations active (chat: ${telegramChatId})`);
+		const maskedId = telegramChatId.length > 4 ? `***${telegramChatId.slice(-4)}` : "***";
+		console.log(`[sentinel] Telegram confirmations active (chat: ${maskedId})`);
 	}
 });

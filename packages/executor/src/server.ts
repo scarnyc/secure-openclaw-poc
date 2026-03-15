@@ -119,7 +119,9 @@ export function createApp(
 					})
 					.catch((err) => {
 						console.error(
-							`[telegram] Send failed: ${err instanceof Error ? err.message : "Unknown"}`,
+							`[telegram] IMPORTANT: Failed to send confirmation for ${manifest.id} (${manifest.tool}, ${decision.category}). ` +
+								`User will NOT receive Telegram prompt — action will auto-deny in ${CONFIRMATION_TIMEOUT_MS / 1000}s. ` +
+								`Error: ${err instanceof Error ? err.message : "Unknown"}`,
 						);
 					});
 			}

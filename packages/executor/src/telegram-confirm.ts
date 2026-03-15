@@ -4,6 +4,10 @@ import { redactAll } from "@sentinel/types";
 const PARAM_TRUNCATE_LIMIT = 200;
 const POLL_TIMEOUT_SECONDS = 30;
 const POLL_ERROR_DELAY_MS = 5_000;
+/** Stop polling after this many consecutive errors (permanent failure assumed) */
+const MAX_CONSECUTIVE_ERRORS = 10;
+/** Telegram limits callback_data to 64 bytes */
+const MAX_CALLBACK_DATA_LENGTH = 64;
 
 export interface TelegramConfirmRequest {
 	manifestId: string;
@@ -53,10 +57,11 @@ export class TelegramConfirmAdapter {
 	start(): void {
 		if (this.running) return;
 		this.running = true;
-		// Fire-and-forget — poll loop runs in background
 		this.pollLoop().catch((err) => {
+			// SENTINEL: Reset running flag so start() can be retried (Finding 2)
+			this.running = false;
 			console.error(
-				`[telegram] Poll loop crashed: ${err instanceof Error ? err.message : "Unknown"}`,
+				`[telegram] FATAL: Poll loop crashed — Telegram confirmations disabled. Error: ${err instanceof Error ? err.message : "Unknown"}`,
 			);
 		});
 	}
@@ -66,11 +71,24 @@ export class TelegramConfirmAdapter {
 	}
 
 	async sendConfirmation(req: TelegramConfirmRequest): Promise<number | undefined> {
+		// SENTINEL: Validate manifestId won't break callback_data parsing (Finding 3)
+		if (req.manifestId.includes(":")) {
+			throw new Error(
+				`manifestId contains colon — incompatible with callback_data format: ${req.manifestId}`,
+			);
+		}
+		const approveData = `confirm:${req.manifestId}:approve`;
+		if (approveData.length > MAX_CALLBACK_DATA_LENGTH) {
+			throw new Error(
+				`callback_data exceeds Telegram's 64-byte limit (${approveData.length} bytes)`,
+			);
+		}
+
 		const text = this.formatMessage(req);
 		const keyboard = {
 			inline_keyboard: [
 				[
-					{ text: "✅ Approve", callback_data: `confirm:${req.manifestId}:approve` },
+					{ text: "✅ Approve", callback_data: approveData },
 					{ text: "❌ Reject", callback_data: `confirm:${req.manifestId}:reject` },
 				],
 			],
@@ -84,8 +102,11 @@ export class TelegramConfirmAdapter {
 		})) as { message_id?: number } | undefined;
 
 		const messageId = result?.message_id;
-		if (messageId) {
+		if (messageId !== undefined && messageId !== null) {
 			console.log(`[telegram] Confirmation sent for ${req.manifestId} (message_id: ${messageId})`);
+		} else {
+			// SENTINEL: Finding 5 — log when message_id is absent
+			console.warn(`[telegram] Confirmation for ${req.manifestId} sent but no message_id returned`);
 		}
 		return messageId;
 	}
@@ -165,20 +186,28 @@ export class TelegramConfirmAdapter {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(body),
 			});
-			if (!res.ok) throw new Error(`Telegram ${method}: ${res.status}`);
-			const data = (await res.json()) as { ok: boolean; result: unknown };
-			if (!data.ok) throw new Error(`Telegram ${method}: API error`);
+			// SENTINEL: Finding 6 — include Telegram's error description for diagnostics
+			const data = (await res.json()) as { ok: boolean; result: unknown; description?: string };
+			if (!res.ok || !data.ok) {
+				throw new Error(
+					`Telegram ${method}: ${res.status} — ${data.description ?? "no description"}`,
+				);
+			}
 			return data.result;
 		});
 	}
 
 	private async pollLoop(): Promise<void> {
+		let consecutiveErrors = 0;
+
 		while (this.running) {
 			try {
 				const updates = (await this.telegramApi("getUpdates", {
 					offset: this.offset,
 					timeout: POLL_TIMEOUT_SECONDS,
 				})) as TelegramUpdate[];
+
+				consecutiveErrors = 0; // Reset on success
 
 				for (const update of updates) {
 					this.offset = update.update_id + 1;
@@ -193,7 +222,20 @@ export class TelegramConfirmAdapter {
 				await sleep(0);
 			} catch (err) {
 				if (!this.running) return;
-				console.error(`[telegram] Poll error: ${err instanceof Error ? err.message : "Unknown"}`);
+				consecutiveErrors++;
+				console.error(
+					`[telegram] Poll error (${consecutiveErrors}/${MAX_CONSECUTIVE_ERRORS}): ${err instanceof Error ? err.message : "Unknown"}`,
+				);
+
+				// SENTINEL: Finding 4 — stop after N consecutive failures (permanent error assumed)
+				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+					console.error(
+						`[telegram] FATAL: ${consecutiveErrors} consecutive poll failures — stopping adapter. Check TELEGRAM vault credentials and network connectivity.`,
+					);
+					this.running = false;
+					return;
+				}
+
 				await sleep(POLL_ERROR_DELAY_MS);
 			}
 		}
@@ -205,6 +247,16 @@ export class TelegramConfirmAdapter {
 			console.warn(
 				`[telegram] SECURITY: callback_query from unauthorized chat ${chatId} (expected ${this.chatId})`,
 			);
+			// SENTINEL: Finding 7 — answer unauthorized callbacks to prevent Telegram re-delivery
+			await this.telegramApi("answerCallbackQuery", {
+				callback_query_id: query.id,
+				text: "Unauthorized",
+				show_alert: true,
+			}).catch((answerErr) => {
+				console.warn(
+					`[telegram] answerCallbackQuery (unauthorized) failed: ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
+				);
+			});
 			return;
 		}
 
@@ -212,27 +264,43 @@ export class TelegramConfirmAdapter {
 		if (!data?.startsWith("confirm:")) return;
 
 		const parts = data.split(":");
-		if (parts.length !== 3) return;
+		if (parts.length !== 3) {
+			// SENTINEL: Finding 8 — log malformed confirm: callbacks instead of silent drop
+			console.warn(`[telegram] Malformed callback data (${parts.length} parts): ${data}`);
+			return;
+		}
 
 		const manifestId = parts[1];
 		const action = parts[2];
-		if (action !== "approve" && action !== "reject") return;
+		if (action !== "approve" && action !== "reject") {
+			console.warn(`[telegram] Unknown action in callback: ${action} (manifestId: ${manifestId})`);
+			return;
+		}
 
 		const approved = action === "approve";
 		const resolved = this.resolveConfirmation(manifestId, approved);
 
 		if (resolved) {
+			// SENTINEL: Finding 1 — replace empty catch with logging
 			await this.telegramApi("answerCallbackQuery", {
 				callback_query_id: query.id,
 				text: approved ? "✅ Approved" : "❌ Rejected",
-			}).catch(() => {});
+			}).catch((answerErr) => {
+				console.warn(
+					`[telegram] answerCallbackQuery failed for ${manifestId} (query: ${query.id}): ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
+				);
+			});
 		} else {
 			console.warn(`[telegram] Unknown manifestId in callback: ${manifestId}`);
 			await this.telegramApi("answerCallbackQuery", {
 				callback_query_id: query.id,
 				text: "⚠ Action not found (may have timed out)",
 				show_alert: true,
-			}).catch(() => {});
+			}).catch((answerErr) => {
+				console.warn(
+					`[telegram] answerCallbackQuery (alert) failed for ${manifestId} (query: ${query.id}): ${answerErr instanceof Error ? answerErr.message : "Unknown"}`,
+				);
+			});
 		}
 	}
 }
