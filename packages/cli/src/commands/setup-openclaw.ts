@@ -110,14 +110,27 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 	// Step 5: Patch OpenClaw config — add plugin config only (no unknown top-level keys)
 	spin.start("Patching OpenClaw configuration...");
 
+	// SENTINEL: plugins.load.paths tells OpenClaw where to find our plugin module.
+	// plugins.entries.sentinel configures it (enabled, failMode, tier).
+	const existingPlugins = (openclawConfig.plugins as Record<string, unknown> | undefined) ?? {};
+	const existingLoad = (existingPlugins.load as Record<string, unknown> | undefined) ?? {};
+	const existingPaths = (existingLoad.paths as string[] | undefined) ?? [];
+
+	// Add extension path if not already present
+	if (!existingPaths.includes(PLUGIN_DIR)) {
+		existingPaths.push(PLUGIN_DIR);
+	}
+
 	const patchedConfig = {
 		...openclawConfig,
 		plugins: {
-			...(openclawConfig.plugins as Record<string, unknown> | undefined),
+			...existingPlugins,
+			load: {
+				...existingLoad,
+				paths: existingPaths,
+			},
 			entries: {
-				...((openclawConfig.plugins as Record<string, unknown> | undefined)?.entries as
-					| Record<string, unknown>
-					| undefined),
+				...(existingPlugins.entries as Record<string, unknown> | undefined),
 				sentinel: {
 					enabled: true,
 					config: {
