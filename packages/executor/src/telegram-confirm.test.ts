@@ -21,9 +21,7 @@ vi.mock("@sentinel/crypto", () => ({
 
 function createMockVault(): CredentialVault {
 	return {
-		retrieveBuffer: vi
-			.fn()
-			.mockReturnValue(Buffer.from(JSON.stringify({ key: "test-bot-token" }))),
+		retrieveBuffer: vi.fn().mockReturnValue(Buffer.from(JSON.stringify({ key: "test-bot-token" }))),
 	} as unknown as CredentialVault;
 }
 
@@ -36,6 +34,13 @@ function makeSendMessageResponse(messageId: number) {
 
 function makeGetUpdatesResponse(updates: unknown[]) {
 	return new Response(JSON.stringify({ ok: true, result: updates }), {
+		status: 200,
+		headers: { "content-type": "application/json" },
+	});
+}
+
+function makeOkResponse() {
+	return new Response(JSON.stringify({ ok: true, result: true }), {
 		status: 200,
 		headers: { "content-type": "application/json" },
 	});
@@ -74,6 +79,9 @@ function createPollMockFetch(
 	const callCounts = { getUpdates: 0, answerCallback: 0 };
 
 	const mockFetch = vi.fn().mockImplementation((url: string, reqOptions?: RequestInit) => {
+		if (typeof url === "string" && url.includes("deleteWebhook")) {
+			return Promise.resolve(makeOkResponse());
+		}
 		if (typeof url === "string" && url.includes("getUpdates")) {
 			callCounts.getUpdates++;
 			if (!delivered) {
@@ -326,6 +334,72 @@ describe("TelegramConfirmAdapter", () => {
 			const fakeToken = `12345678:${"A".repeat(35)}`;
 			const formatted = _formatParamValue(fakeToken);
 			expect(formatted).toContain("REDACTED");
+		});
+	});
+
+	describe("deleteWebhook on start", () => {
+		it("calls deleteWebhook before first getUpdates to prevent 409 conflicts", async () => {
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "555");
+			const callOrder: string[] = [];
+
+			const mockFetch = vi.fn().mockImplementation((url: string) => {
+				if (typeof url === "string" && url.includes("deleteWebhook")) {
+					callOrder.push("deleteWebhook");
+					return Promise.resolve(makeOkResponse());
+				}
+				if (typeof url === "string" && url.includes("getUpdates")) {
+					callOrder.push("getUpdates");
+					adapter.stop();
+					return Promise.resolve(makeGetUpdatesResponse([]));
+				}
+				return Promise.resolve(new Response("not found", { status: 404 }));
+			});
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+
+			await vi.waitFor(
+				() => {
+					expect(callOrder.length).toBeGreaterThanOrEqual(2);
+				},
+				{ timeout: 2000 },
+			);
+
+			expect(callOrder[0]).toBe("deleteWebhook");
+			expect(callOrder[1]).toBe("getUpdates");
+		});
+
+		it("continues polling even if deleteWebhook fails", async () => {
+			const vault = createMockVault();
+			const adapter = new TelegramConfirmAdapter(vault, "555");
+			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+			let getUpdatesCalled = false;
+
+			const mockFetch = vi.fn().mockImplementation((url: string) => {
+				if (typeof url === "string" && url.includes("deleteWebhook")) {
+					return Promise.resolve(makeErrorResponse(500, "Internal Server Error"));
+				}
+				if (typeof url === "string" && url.includes("getUpdates")) {
+					getUpdatesCalled = true;
+					adapter.stop();
+					return Promise.resolve(makeGetUpdatesResponse([]));
+				}
+				return Promise.resolve(new Response("not found", { status: 404 }));
+			});
+			vi.stubGlobal("fetch", mockFetch);
+
+			adapter.start();
+
+			await vi.waitFor(
+				() => {
+					expect(getUpdatesCalled).toBe(true);
+				},
+				{ timeout: 2000 },
+			);
+
+			expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("deleteWebhook failed"));
+			warnSpy.mockRestore();
 		});
 	});
 
@@ -610,6 +684,9 @@ describe("TelegramConfirmAdapter", () => {
 			const adapter = new TelegramConfirmAdapter(vault, "123");
 
 			const mockFetch = vi.fn().mockImplementation((url: string) => {
+				if (typeof url === "string" && url.includes("deleteWebhook")) {
+					return Promise.resolve(makeOkResponse());
+				}
 				if (typeof url === "string" && url.includes("getUpdates")) {
 					callCount++;
 					if (callCount >= 2) {
@@ -643,6 +720,9 @@ describe("TelegramConfirmAdapter", () => {
 			const adapter = new TelegramConfirmAdapter(vault, "123");
 
 			const mockFetch = vi.fn().mockImplementation((url: string) => {
+				if (typeof url === "string" && url.includes("deleteWebhook")) {
+					return Promise.resolve(makeOkResponse());
+				}
 				if (typeof url === "string" && url.includes("getUpdates")) {
 					callCount++;
 					if (callCount >= 3) {
@@ -676,8 +756,18 @@ describe("TelegramConfirmAdapter", () => {
 			const adapter = new TelegramConfirmAdapter(vault, "123");
 			const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
 
-			// Mock fetch to always fail — simulates permanent error (401 Unauthorized)
-			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeErrorResponse(401, "Unauthorized")));
+			// Mock fetch: deleteWebhook succeeds, then all getUpdates fail (401 Unauthorized)
+			let webhookCleared = false;
+			vi.stubGlobal(
+				"fetch",
+				vi.fn().mockImplementation((url: string) => {
+					if (typeof url === "string" && url.includes("deleteWebhook") && !webhookCleared) {
+						webhookCleared = true;
+						return Promise.resolve(makeOkResponse());
+					}
+					return Promise.resolve(makeErrorResponse(401, "Unauthorized"));
+				}),
+			);
 
 			adapter.start();
 
@@ -695,6 +785,9 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal(
 				"fetch",
 				vi.fn().mockImplementation((url: string) => {
+					if (typeof url === "string" && url.includes("deleteWebhook")) {
+						return Promise.resolve(makeOkResponse());
+					}
 					if (typeof url === "string" && url.includes("getUpdates")) {
 						secondStartCalled = true;
 						adapter.stop();

@@ -198,6 +198,16 @@ export class TelegramConfirmAdapter {
 	}
 
 	private async pollLoop(): Promise<void> {
+		// SENTINEL: Clear any active webhook before polling — Telegram rejects
+		// getUpdates with 409 Conflict while a webhook is registered.
+		try {
+			await this.telegramApi("deleteWebhook", {});
+		} catch (err) {
+			console.warn(
+				`[telegram] deleteWebhook failed (polling may 409): ${err instanceof Error ? err.message : "Unknown"}`,
+			);
+		}
+
 		let consecutiveErrors = 0;
 
 		while (this.running) {

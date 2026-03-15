@@ -282,6 +282,7 @@ Details in `docs/plans/path-a-v2-adopt-openfang-primitives.md` and MEMORY.md eva
 | `SENTINEL_GWS_ACCOUNT_EMAIL` | Container | Expected Google account email for identity validation |
 | `SENTINEL_AUTH_TOKEN` | Container | Fixed auth token for executor API (auto-generated if unset in Docker) |
 | `SENTINEL_TELEGRAM_CHAT_ID` | Container | Telegram chat/user ID for confirmation delivery (optional) |
+| `SENTINEL_CONFIRMATION_TIMEOUT_MS` | Container | Client timeout for `/confirm-only` long-polling (default 330000ms) |
 | `SENTINEL_VAULT_PASSWORD` | Container | Master password for vault decryption (prompted by `sentinel start`) |
 
 API keys stored in encrypted vault via `sentinel init`. Local dev uses `.dev.vars` (see `.dev.vars.example`). **Never** commit `.dev.vars` with real values.
