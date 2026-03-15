@@ -119,8 +119,15 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	// one internally but the gateway can't match it. Generate here so both share the same value.
 	const authToken = process.env.SENTINEL_AUTH_TOKEN || randomBytes(32).toString("hex");
 
+	// SENTINEL: Default egress bindings for Telegram confirmation interception (Docker mode)
+	const defaultEgressBindings = JSON.stringify([
+		{ serviceId: "telegram_bot", allowedDomains: ["api.telegram.org"] },
+	]);
+
 	const composeEnv: Record<string, string> = {
 		SENTINEL_AUTH_TOKEN: authToken,
+		// Egress bindings: use host env override if set, otherwise default with Telegram
+		SENTINEL_EGRESS_BINDINGS: process.env.SENTINEL_EGRESS_BINDINGS || defaultEgressBindings,
 	};
 	if (vaultPassword) {
 		composeEnv.SENTINEL_VAULT_PASSWORD = vaultPassword;

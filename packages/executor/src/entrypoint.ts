@@ -153,14 +153,11 @@ serve({ fetch: app.fetch, port, hostname: host }, () => {
 			b.allowedDomains.some((d) => d === "api.telegram.org"),
 		);
 		if (hasTelegramBinding) {
-			console.log("[sentinel] Telegram confirmations active (via egress proxy interception)");
-		} else {
-			// Host deployment: OpenClaw calls Telegram directly, egress interception won't work.
-			// Fall back to direct polling for callback_query updates.
-			console.log(
-				"[sentinel] No egress binding for api.telegram.org — starting fallback Telegram polling",
-			);
-			telegramAdapter.startFallbackPolling(resolveConfirmation);
+			console.log("[sentinel] Telegram egress proxy interception active (Docker mode)");
 		}
+		// SENTINEL: Always start fallback polling — handles hybrid deployment
+		// (host OpenClaw + Docker executor) where egress interception can't fire.
+		// Both paths use the same resolveConfirmation — idempotent (Map.delete on first, false on second).
+		telegramAdapter.startFallbackPolling(resolveConfirmation);
 	}
 });
