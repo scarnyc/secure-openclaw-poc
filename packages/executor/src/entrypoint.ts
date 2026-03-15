@@ -6,6 +6,7 @@ import type { EgressBinding } from "@sentinel/types";
 import { ensureDockerAuth } from "./docker-auth.js";
 import { applyDockerDefaults } from "./docker-defaults.js";
 import { createApp } from "./server.js";
+import { TelegramConfirmAdapter } from "./telegram-confirm.js";
 import { createToolRegistry } from "./tools/index.js";
 
 const mutableConfig = getDefaultConfig();
@@ -92,11 +93,56 @@ if (egressBindingsRaw) {
 	}
 }
 
-const app = createApp(config, auditLogger, registry, vault, hmacSecret, undefined, egressBindings);
+// SENTINEL: Telegram confirmation adapter — sends confirmation prompts via Telegram bot
+// Vault entries: "telegram_bot" (bot token as {"key": "<token>"}), "TELEGRAM_CHAT" (chat ID as {"key": "<id>"})
+// Both stored via `sentinel vault add`. Falls back to SENTINEL_TELEGRAM_CHAT_ID env var for chat ID.
+let telegramAdapter: TelegramConfirmAdapter | undefined;
+if (vault) {
+	try {
+		const { useCredential } = await import("@sentinel/crypto");
+		// Read chat ID from vault — stored as separate entry via `sentinel vault add`
+		const chatId = await useCredential(vault, "TELEGRAM_CHAT", ["key"] as const, (cred) => cred.key);
+		telegramAdapter = new TelegramConfirmAdapter(vault, chatId);
+		console.log("[sentinel] Telegram adapter created from vault credentials");
+	} catch {
+		// TELEGRAM_CHAT not in vault — fall back to env var
+		const telegramChatId = process.env.SENTINEL_TELEGRAM_CHAT_ID;
+		if (telegramChatId) {
+			try {
+				telegramAdapter = new TelegramConfirmAdapter(vault, telegramChatId);
+				console.log("[sentinel] Telegram adapter created with env var chat ID");
+			} catch (err) {
+				console.error(
+					`[sentinel] Failed to create Telegram adapter — confirmations will only be available via HTTP /confirm endpoint. ` +
+						`Error: ${err instanceof Error ? err.message : "Unknown"}`,
+				);
+			}
+		}
+	}
+} else if (process.env.SENTINEL_TELEGRAM_CHAT_ID) {
+	console.warn(
+		"[sentinel] SENTINEL_TELEGRAM_CHAT_ID is set but vault is unavailable — Telegram confirmations disabled",
+	);
+}
+
+const app = createApp(
+	config,
+	auditLogger,
+	registry,
+	vault,
+	hmacSecret,
+	undefined,
+	egressBindings,
+	telegramAdapter,
+);
 
 const port = config.executor.port;
 const host = "0.0.0.0";
 
 serve({ fetch: app.fetch, port, hostname: host }, () => {
 	console.log(`Sentinel Executor listening on http://${host}:${port}`);
+	if (telegramAdapter) {
+		telegramAdapter.start();
+		console.log("[sentinel] Telegram confirmations active");
+	}
 });

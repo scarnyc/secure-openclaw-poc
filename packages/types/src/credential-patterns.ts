@@ -44,6 +44,8 @@ const CREDENTIAL_PATTERNS: readonly RegExp[] = [
 	/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g,
 	// Stripe secret keys
 	/\bsk_(live|test)_[A-Za-z0-9]{20,}/g,
+	// Telegram bot tokens (numeric bot ID + alphanumeric secret)
+	/\b\d{8,}:[A-Za-z0-9_-]{35}\b/g,
 ];
 
 const REDACTED = "[REDACTED]";

@@ -19,6 +19,8 @@ Optional follow-up (separate commit) | The config only has sentinel-openai provi
 9. Set up sentinel memory plugin
 10. Fix set-up and create guide to make it more intuitive and user friendly
 11. use ag-ui protocol for all UI approve / rejects
+12. secure telegram channels upon server wind-down
+13. Fix vault password masking upon `sentinel start`
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
 
@@ -133,7 +135,7 @@ sentinel chat               # Start interactive agent session with TUI confirmat
                           └─────────────────────┘
 ```
 
-Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. OpenClaw agents use `/classify` (classification-only) and `/filter-output` (credential/PII scrubbing) endpoints via the `@sentinel/openclaw-plugin` package. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. External API calls (Telegram, etc.) are proxied through executor's `/proxy/egress` endpoint, which injects domain-scoped credentials from the vault and applies SSRF protection. Confirmation TUI runs on host (trust anchor), never inside Docker.
+Agent sends **Action Manifests** (typed JSON) to executor over HTTP :3141. Executor validates, classifies, moderates, optionally confirms with user, executes, audits, returns sanitized results. OpenClaw agents use `/classify` (classification-only) and `/filter-output` (credential/PII scrubbing) endpoints via the `@sentinel/openclaw-plugin` package. Agent container has `internal: true` network — no direct internet access. LLM calls are proxied through executor's `/proxy/llm/*` endpoint, which injects API keys and restricts to allowlisted hosts. External API calls (Telegram, etc.) are proxied through executor's `/proxy/egress` endpoint, which injects domain-scoped credentials from the vault and applies SSRF protection. Confirmation TUI runs on host (trust anchor), never inside Docker. Telegram adapter (optional) sends confirmation prompts via bot API long-polling when `SENTINEL_TELEGRAM_CHAT_ID` is set.
 
 ### OpenClaw Parallel Agent Model
 
@@ -279,6 +281,7 @@ Details in `docs/plans/path-a-v2-adopt-openfang-primitives.md` and MEMORY.md eva
 | `SENTINEL_GWS_AGENT_SCOPES` | Container | JSON-encoded per-agent GWS scope map |
 | `SENTINEL_GWS_ACCOUNT_EMAIL` | Container | Expected Google account email for identity validation |
 | `SENTINEL_AUTH_TOKEN` | Container | Fixed auth token for executor API (auto-generated if unset in Docker) |
+| `SENTINEL_TELEGRAM_CHAT_ID` | Container | Telegram chat/user ID for confirmation delivery (optional) |
 | `SENTINEL_VAULT_PASSWORD` | Container | Master password for vault decryption (prompted by `sentinel start`) |
 
 API keys stored in encrypted vault via `sentinel init`. Local dev uses `.dev.vars` (see `.dev.vars.example`). **Never** commit `.dev.vars` with real values.

@@ -26,6 +26,7 @@ import {
 	ManifestValidationError,
 	type PipelineGuards,
 } from "./router.js";
+import type { TelegramConfirmAdapter } from "./telegram-confirm.js";
 import type { ToolRegistry } from "./tools/registry.js";
 
 const ConfirmBodySchema = z.object({
@@ -59,9 +60,24 @@ export function createApp(
 	hmacSecret?: Buffer,
 	delegationQueue?: DelegationQueue,
 	egressBindings?: EgressBinding[],
+	telegramAdapter?: TelegramConfirmAdapter,
 ): Hono {
 	const app = new Hono();
 	const pendingConfirmations = new Map<string, PendingConfirmation>();
+
+	// SENTINEL: Shared confirmation resolver — used by both HTTP endpoint and Telegram adapter
+	function resolveConfirmation(manifestId: string, approved: boolean): boolean {
+		const pending = pendingConfirmations.get(manifestId);
+		if (!pending) return false;
+		pendingConfirmations.delete(manifestId);
+		pending.resolve(approved);
+		return true;
+	}
+
+	// SENTINEL: Wire Telegram adapter to resolve confirmations from callback queries
+	if (telegramAdapter) {
+		telegramAdapter.bindResolver(resolveConfirmation);
+	}
 
 	// SENTINEL: Phase 1 pipeline guards — rate limiter and loop guard
 	const guards: PipelineGuards = {
@@ -90,6 +106,25 @@ export function createApp(
 					resolve(approved);
 				},
 			});
+
+			// SENTINEL: Fire-and-forget Telegram notification (fail-open — 5-min auto-deny still applies)
+			if (telegramAdapter) {
+				telegramAdapter
+					.sendConfirmation({
+						manifestId: manifest.id,
+						tool: manifest.tool,
+						parameters: manifest.parameters,
+						category: decision.category,
+						reason: decision.reason,
+					})
+					.catch((err) => {
+						console.error(
+							`[telegram] IMPORTANT: Failed to send confirmation for ${manifest.id} (${manifest.tool}, ${decision.category}). ` +
+								`User will NOT receive Telegram prompt — action will auto-deny in ${CONFIRMATION_TIMEOUT_MS / 1000}s. ` +
+								`Error: ${err instanceof Error ? err.message : "Unknown"}`,
+						);
+					});
+			}
 		});
 	};
 
@@ -318,23 +353,19 @@ export function createApp(
 
 	app.post("/confirm/:manifestId", async (c) => {
 		const { manifestId } = c.req.param();
-		const pending = pendingConfirmations.get(manifestId);
-
-		if (!pending) {
-			return c.json({ error: "No pending confirmation found" }, 404);
-		}
 
 		const raw = await c.req.json();
 		const parsed = ConfirmBodySchema.safeParse(raw);
 		if (!parsed.success) {
 			return c.json({ error: "Invalid body: expected { approved: boolean }" }, 400);
 		}
-		const approved = parsed.data.approved;
 
-		pendingConfirmations.delete(manifestId);
-		pending.resolve(approved);
+		const resolved = resolveConfirmation(manifestId, parsed.data.approved);
+		if (!resolved) {
+			return c.json({ error: "No pending confirmation found" }, 404);
+		}
 
-		return c.json({ status: approved ? "approved" : "denied" });
+		return c.json({ status: parsed.data.approved ? "approved" : "denied" });
 	});
 
 	return app;
