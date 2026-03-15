@@ -192,6 +192,12 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 	const workspaceDir = join(OPENCLAW_CONFIG_DIR, "workspace");
 	mkdirSync(workspaceDir, { recursive: true });
 	const soulPath = join(workspaceDir, "SOUL.md");
+	// SENTINEL: Back up existing SOUL.md before overwriting — user may have customized it
+	if (existsSync(soulPath)) {
+		const backupPath = join(workspaceDir, `SOUL.md.backup.${Date.now()}`);
+		copyFileSync(soulPath, backupPath);
+		console.log(`  Backed up existing SOUL.md → ${backupPath}`);
+	}
 	writeFileSync(soulPath, soulContent);
 
 	spin.stop("SOUL.md generated");
