@@ -35,7 +35,6 @@
 	],
 	"mcpDefaults": {
 		"unknownTool": "write",
-		"nameHeuristic": "Tools with search/read/list/get/view/fetch/find/describe/show/query/lookup in name → read; write tokens take precedence",
 		"serverOverrides": {}
 	}
 }

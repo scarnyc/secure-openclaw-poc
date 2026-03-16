@@ -5,7 +5,10 @@ import { ActionManifestSchema, ClassifyRequestSchema } from "@sentinel/types";
 import type { Context } from "hono";
 
 function summarizeParams(params: Record<string, unknown>): string {
-	return redactCredentials(JSON.stringify(params).substring(0, 500));
+	// Redact BEFORE truncating — truncation can split credential patterns,
+	// causing partial credentials to survive regex matching (Invariant #1)
+	const redacted = redactCredentials(JSON.stringify(params));
+	return redacted.length > 500 ? `${redacted.substring(0, 497)}...` : redacted;
 }
 
 export interface ClassifyGuards {

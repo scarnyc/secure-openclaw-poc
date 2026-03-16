@@ -1,5 +1,5 @@
 export { classifyBashCommand } from "./bash-parser.js";
-export { classify, inferCategoryFromName } from "./classifier.js";
+export { classify } from "./classifier.js";
 export {
 	type LoopAction,
 	type LoopCheckResult,
