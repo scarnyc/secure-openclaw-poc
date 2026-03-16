@@ -14,5 +14,8 @@ SENTINEL_AUDIT_ENABLED=true
 # Path whitelist (comma-separated, defaults to cwd in local mode)
 # SENTINEL_ALLOWED_ROOTS=/Users/you/Code/project1,/Users/you/Code/project2
 
+# Confirmation web UI base URL (set to LAN IP for phone access, or Cloudflare Tunnel URL)
+# SENTINEL_CONFIRM_BASE_URL=http://192.168.1.169:3141
+
 # Bash sandbox (firejail is Linux-only, ignored on macOS)
 # SENTINEL_BASH_SANDBOX=firejail

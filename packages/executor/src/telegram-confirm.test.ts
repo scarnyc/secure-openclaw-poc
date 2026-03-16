@@ -64,20 +64,20 @@ describe("TelegramConfirmAdapter", () => {
 	describe("constructor", () => {
 		it("validates chat ID is a number", () => {
 			const vault = createMockVault();
-			expect(() => new TelegramConfirmAdapter(vault, "not-a-number")).toThrow(
-				'Invalid SENTINEL_TELEGRAM_CHAT_ID: "not-a-number" is not a number',
-			);
+			expect(
+				() => new TelegramConfirmAdapter(vault, "not-a-number", "http://localhost:3141"),
+			).toThrow('Invalid SENTINEL_TELEGRAM_CHAT_ID: "not-a-number" is not a number');
 		});
 
 		it("accepts valid numeric chat ID string", () => {
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123456");
+			const adapter = new TelegramConfirmAdapter(vault, "123456", "http://localhost:3141");
 			expect(adapter).toBeInstanceOf(TelegramConfirmAdapter);
 		});
 
 		it("does not store bot token as instance property", () => {
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123456");
+			const adapter = new TelegramConfirmAdapter(vault, "123456", "http://localhost:3141");
 			const keys = Object.keys(adapter);
 			const proto = Object.getOwnPropertyNames(Object.getPrototypeOf(adapter));
 			const allKeys = [...keys, ...proto];
@@ -92,14 +92,14 @@ describe("TelegramConfirmAdapter", () => {
 	describe("public API surface", () => {
 		it("chatId is public and accessible as a number", () => {
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "99887766");
+			const adapter = new TelegramConfirmAdapter(vault, "99887766", "http://localhost:3141");
 			expect(adapter.chatId).toBe(99887766);
 			expect(typeof adapter.chatId).toBe("number");
 		});
 
 		it("toInterceptor returns a valid TelegramInterceptor", () => {
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "12345");
+			const adapter = new TelegramConfirmAdapter(vault, "12345", "http://localhost:3141");
 			const resolver = vi.fn().mockReturnValue(true);
 			const interceptor = adapter.toInterceptor(resolver);
 
@@ -119,7 +119,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			const result = await adapter.telegramApi("answerCallbackQuery", {
 				callback_query_id: "cb-123",
 				text: "Done",
@@ -133,12 +133,12 @@ describe("TelegramConfirmAdapter", () => {
 	});
 
 	describe("sendConfirmation", () => {
-		it("calls Telegram sendMessage API with correct chat_id and inline keyboard", async () => {
+		it("calls Telegram sendMessage API with correct chat_id and web link", async () => {
 			const mockFetch = vi.fn().mockResolvedValue(makeSendMessageResponse(42));
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "99887766");
+			const adapter = new TelegramConfirmAdapter(vault, "99887766", "http://localhost:3141");
 			const req = baseRequest();
 			const messageId = await adapter.sendConfirmation(req);
 
@@ -150,14 +150,8 @@ describe("TelegramConfirmAdapter", () => {
 			const body = JSON.parse(options.body as string);
 			expect(body.chat_id).toBe(99887766);
 			expect(body.parse_mode).toBe("MarkdownV2");
-			expect(body.reply_markup.inline_keyboard).toHaveLength(1);
-			expect(body.reply_markup.inline_keyboard[0]).toHaveLength(2);
-			expect(body.reply_markup.inline_keyboard[0][0].callback_data).toBe(
-				"confirm:test-manifest-1:approve",
-			);
-			expect(body.reply_markup.inline_keyboard[0][1].callback_data).toBe(
-				"confirm:test-manifest-1:reject",
-			);
+			expect(body.reply_markup).toBeUndefined();
+			expect(body.text).toContain("confirm\\-ui/test\\-manifest\\-1");
 			expect(messageId).toBe(42);
 		});
 
@@ -165,7 +159,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", vi.fn().mockResolvedValue(makeSendMessageResponse(777)));
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			const messageId = await adapter.sendConfirmation(baseRequest());
 			expect(messageId).toBe(777);
 		});
@@ -175,7 +169,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await adapter.sendConfirmation(baseRequest());
 
 			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
@@ -190,7 +184,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await adapter.sendConfirmation(baseRequest({ category: "write-irreversible" }));
 
 			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
@@ -203,7 +197,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await adapter.sendConfirmation(baseRequest({ category: "write" }));
 
 			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
@@ -211,21 +205,30 @@ describe("TelegramConfirmAdapter", () => {
 			expect(text).not.toContain("CANNOT BE UNDONE");
 		});
 
-		it("rejects manifestId containing colons", async () => {
+		it("message text includes confirm-ui web link with manifestId", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(makeSendMessageResponse(1));
+			vi.stubGlobal("fetch", mockFetch);
+
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
-			await expect(
-				adapter.sendConfirmation(baseRequest({ manifestId: "evil:reject" })),
-			).rejects.toThrow("manifestId contains colon");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
+			await adapter.sendConfirmation(baseRequest({ manifestId: "abc-123" }));
+
+			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+			const text = body.text as string;
+			expect(text).toContain("confirm\\-ui/abc\\-123");
 		});
 
-		it("rejects manifestId that would exceed Telegram 64-byte callback_data limit", async () => {
+		it("confirmBaseUrl from constructor appears in message text", async () => {
+			const mockFetch = vi.fn().mockResolvedValue(makeSendMessageResponse(1));
+			vi.stubGlobal("fetch", mockFetch);
+
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
-			const longId = "a".repeat(60); // confirm: (8) + 60 + :approve (8) = 76 > 64
-			await expect(adapter.sendConfirmation(baseRequest({ manifestId: longId }))).rejects.toThrow(
-				"64-byte limit",
-			);
+			const adapter = new TelegramConfirmAdapter(vault, "123", "https://sentinel.example.com");
+			await adapter.sendConfirmation(baseRequest());
+
+			const body = JSON.parse(mockFetch.mock.calls[0][1].body as string);
+			const text = body.text as string;
+			expect(text).toContain("sentinel\\.example\\.com");
 		});
 
 		it("propagates Telegram API errors (non-200)", async () => {
@@ -235,7 +238,7 @@ describe("TelegramConfirmAdapter", () => {
 			);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await expect(adapter.sendConfirmation(baseRequest())).rejects.toThrow(
 				"Telegram sendMessage: 500",
 			);
@@ -256,7 +259,7 @@ describe("TelegramConfirmAdapter", () => {
 			);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await expect(adapter.sendConfirmation(baseRequest())).rejects.toThrow("can't parse entities");
 		});
 
@@ -273,7 +276,7 @@ describe("TelegramConfirmAdapter", () => {
 			);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			const result = await adapter.sendConfirmation(baseRequest());
 
 			expect(result).toBeUndefined();
@@ -326,7 +329,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await adapter.sendConfirmation({
 				manifestId: "gws-email-1",
 				tool: "gws",
@@ -357,7 +360,7 @@ describe("TelegramConfirmAdapter", () => {
 			vi.stubGlobal("fetch", mockFetch);
 
 			const vault = createMockVault();
-			const adapter = new TelegramConfirmAdapter(vault, "123");
+			const adapter = new TelegramConfirmAdapter(vault, "123", "http://localhost:3141");
 			await adapter.sendConfirmation({
 				manifestId: "gws-email-2",
 				tool: "gws",

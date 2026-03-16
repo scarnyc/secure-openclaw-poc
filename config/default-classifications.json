@@ -13,6 +13,10 @@
 			"defaultCategory": "write"
 		},
 		{
+			"tool": "memory_search",
+			"defaultCategory": "read"
+		},
+		{
 			"tool": "bash",
 			"defaultCategory": "write",
 			"overrides": [

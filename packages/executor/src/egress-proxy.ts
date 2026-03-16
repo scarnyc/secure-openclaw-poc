@@ -21,7 +21,11 @@ const UPSTREAM_TIMEOUT_MS = 60_000;
 
 export interface TelegramInterceptor {
 	isAuthorizedChat: (chatId: number) => boolean;
-	resolveConfirmation: (manifestId: string, approved: boolean) => boolean;
+	resolveConfirmation: (
+		manifestId: string,
+		approved: boolean,
+		source?: "web" | "api" | "telegram",
+	) => boolean;
 	acknowledgeCallback: (callbackQueryId: string, text: string, showAlert: boolean) => Promise<void>;
 }
 
@@ -95,7 +99,7 @@ function interceptTelegramUpdates(
 			}
 
 			const approved = action === "approve";
-			const resolved = interceptor.resolveConfirmation(manifestId, approved);
+			const resolved = interceptor.resolveConfirmation(manifestId, approved, "telegram");
 
 			// Answer the callback (fire-and-forget)
 			interceptor

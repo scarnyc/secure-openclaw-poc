@@ -14,6 +14,9 @@ import { z } from "zod";
 import { createAuthMiddleware } from "./auth-middleware.js";
 import { type ClassifyGuards, handleClassify } from "./classify-endpoint.js";
 import { handleConfirmOnly } from "./confirm-endpoint.js";
+import { generateConfirmToken, verifyConfirmToken } from "./confirm-token.js";
+import { createConfirmUiHandler } from "./confirm-ui.js";
+import { type ConfirmationEvent, createConfirmationStream } from "./confirmation-stream.js";
 import type { DelegationQueue } from "./delegate-handler.js";
 import { createEgressProxyHandler, type TelegramInterceptor } from "./egress-proxy.js";
 import { handleFilterOutput } from "./filter-endpoint.js";
@@ -31,6 +34,11 @@ import type { ToolRegistry } from "./tools/registry.js";
 
 const ConfirmBodySchema = z.object({
 	approved: z.boolean(),
+});
+
+const ConfirmTokenQuerySchema = z.object({
+	token: z.string().regex(/^[0-9a-f]{64}$/),
+	expires: z.coerce.number().int().positive(),
 });
 
 interface PendingConfirmation {
@@ -61,16 +69,51 @@ export function createApp(
 	delegationQueue?: DelegationQueue,
 	egressBindings?: EgressBinding[],
 	telegramAdapter?: TelegramConfirmAdapter,
-): { app: Hono; resolveConfirmation: (manifestId: string, approved: boolean) => boolean } {
+	confirmBaseUrl?: string,
+): {
+	app: Hono;
+	resolveConfirmation: (
+		manifestId: string,
+		approved: boolean,
+		source?: "web" | "api" | "telegram",
+	) => boolean;
+	emitConfirmation: (event: ConfirmationEvent) => void;
+} {
 	const app = new Hono();
 	const pendingConfirmations = new Map<string, PendingConfirmation>();
+	const confirmStream = createConfirmationStream();
+	const baseUrl = confirmBaseUrl ?? "http://localhost:3141";
 
-	// SENTINEL: Shared confirmation resolver — used by HTTP endpoint, egress proxy, and fallback polling
-	function resolveConfirmation(manifestId: string, approved: boolean): boolean {
+	// SENTINEL: Shared confirmation resolver — used by HTTP endpoint, egress proxy, and web UI
+	function resolveConfirmation(
+		manifestId: string,
+		approved: boolean,
+		source: "web" | "api" | "telegram" = "web",
+	): boolean {
 		const pending = pendingConfirmations.get(manifestId);
-		if (!pending) return false;
+		if (!pending) {
+			console.warn(
+				`[confirm] Resolution attempted for ${manifestId} (approved=${approved}) but no pending confirmation found — may have timed out or already resolved`,
+			);
+			return false;
+		}
+		console.log(
+			`[confirm] Resolving ${manifestId} (tool=${pending.manifest.tool}, approved=${approved})`,
+		);
 		pendingConfirmations.delete(manifestId);
 		pending.resolve(approved);
+
+		// SENTINEL: Emit ag-ui SSE event for connected clients
+		confirmStream.emit({
+			type: "custom",
+			name: "confirmation_resolved",
+			value: {
+				manifestId,
+				decision: approved ? "approved" : "denied",
+				resolvedBy: source,
+			},
+		});
+
 		return true;
 	}
 
@@ -88,6 +131,15 @@ export function createApp(
 			const timeout = setTimeout(() => {
 				pendingConfirmations.delete(manifest.id);
 				resolve(false); // auto-deny
+				confirmStream.emit({
+					type: "custom",
+					name: "confirmation_resolved",
+					value: {
+						manifestId: manifest.id,
+						decision: "timeout",
+						resolvedBy: "timeout",
+					},
+				});
 				console.warn(
 					`[sentinel] Confirmation timeout for ${manifest.id} (${manifest.tool}) — auto-denied after ${CONFIRMATION_TIMEOUT_MS / 1000}s`,
 				);
@@ -102,6 +154,27 @@ export function createApp(
 				},
 			});
 
+			// SENTINEL: Generate HMAC-signed URL token for phone browser access (no bearer token needed)
+			const tokenExpiresAt = Date.now() + CONFIRMATION_TIMEOUT_MS;
+			const urlToken = generateConfirmToken(manifest.id, tokenExpiresAt, confirmTokenSecret);
+			const tokenQuery = `?token=${urlToken}&expires=${tokenExpiresAt}`;
+			const confirmUrl = `${baseUrl}/confirm-ui/${manifest.id}${tokenQuery}`;
+
+			// SENTINEL: Emit ag-ui SSE event for connected clients
+			confirmStream.emit({
+				type: "custom",
+				name: "confirmation_requested",
+				value: {
+					manifestId: manifest.id,
+					tool: manifest.tool,
+					category: decision.category,
+					reason: decision.reason,
+					parameters: JSON.parse(redactAll(JSON.stringify(manifest.parameters))),
+					expiresAt: new Date(tokenExpiresAt).toISOString(),
+					confirmUrl,
+				},
+			});
+
 			// SENTINEL: Fire-and-forget Telegram notification (fail-open — 5-min auto-deny still applies)
 			if (telegramAdapter) {
 				telegramAdapter
@@ -111,6 +184,7 @@ export function createApp(
 						parameters: manifest.parameters,
 						category: decision.category,
 						reason: decision.reason,
+						confirmUrl,
 					})
 					.catch((err) => {
 						console.error(
@@ -190,10 +264,49 @@ export function createApp(
 			);
 		}
 	}
+	// SENTINEL: Derive confirm token secret from HMAC secret (or generate standalone 32-byte key)
+	if (!hmacSecret) {
+		console.warn(
+			"[sentinel] No HMAC secret — generated ephemeral confirm token key (will not survive restart)",
+		);
+	}
+	const confirmTokenSecret = hmacSecret ?? Buffer.from(crypto.getRandomValues(new Uint8Array(32)));
+
 	app.use("*", async (c, next) => {
 		if (c.req.path === "/health") {
 			return next();
 		}
+
+		// SENTINEL: Allow HMAC-signed URL token auth for confirmation web routes
+		// These are accessed from a phone browser — no bearer token available
+		const confirmUiMatch = c.req.path.match(/^\/confirm-ui\/([^/]+)$/);
+		const confirmPostMatch = c.req.path.match(/^\/confirm\/([^/]+)$/);
+		const match = confirmUiMatch ?? confirmPostMatch;
+
+		if (match) {
+			const manifestId = match[1];
+			const url = new URL(c.req.url);
+			const token = url.searchParams.get("token");
+			const expires = url.searchParams.get("expires");
+
+			// SENTINEL: Partial HMAC params — both must be present or neither
+			if (token || expires) {
+				if (!token || !expires) {
+					return c.json({ error: "Both 'token' and 'expires' query parameters are required" }, 400);
+				}
+				const parsed = ConfirmTokenQuerySchema.safeParse({ token, expires });
+				if (!parsed.success) {
+					return c.json({ error: "Invalid token or expires format" }, 400);
+				}
+				if (
+					verifyConfirmToken(manifestId, parsed.data.token, parsed.data.expires, confirmTokenSecret)
+				) {
+					return next(); // Valid HMAC token — bypass bearer auth
+				}
+				return c.json({ error: "Invalid or expired confirmation token" }, 403);
+			}
+		}
+
 		return authMiddleware(c, next);
 	});
 
@@ -205,11 +318,17 @@ export function createApp(
 		return c.json(registry.list());
 	});
 
+	// SENTINEL: ag-ui SSE confirmation event stream
+	app.get("/confirmations/stream", confirmStream.handler);
+
+	// SENTINEL: Web confirmation UI — user clicks link from Telegram/Slack to approve/deny
+	app.get("/confirm-ui/:manifestId", createConfirmUiHandler(pendingConfirmations, baseUrl));
+
 	app.get("/pending-confirmations", (c) => {
 		const pending = Array.from(pendingConfirmations.entries()).map(([id, p]) => ({
 			manifestId: id,
 			tool: p.manifest.tool,
-			parameters: p.manifest.parameters,
+			parameters: JSON.parse(redactAll(JSON.stringify(p.manifest.parameters))),
 			category: p.decision.category,
 			reason: p.decision.reason,
 		}));
@@ -356,20 +475,24 @@ export function createApp(
 
 	app.post("/confirm/:manifestId", async (c) => {
 		const { manifestId } = c.req.param();
+		console.log(`[confirm] POST /confirm/${manifestId} received`);
 
 		const raw = await c.req.json();
 		const parsed = ConfirmBodySchema.safeParse(raw);
 		if (!parsed.success) {
+			console.warn(`[confirm] Invalid body for ${manifestId}: ${parsed.error.message}`);
 			return c.json({ error: "Invalid body: expected { approved: boolean }" }, 400);
 		}
 
 		const resolved = resolveConfirmation(manifestId, parsed.data.approved);
 		if (!resolved) {
+			console.warn(`[confirm] 404 for ${manifestId} — not in pending map`);
 			return c.json({ error: "No pending confirmation found" }, 404);
 		}
 
+		console.log(`[confirm] ${manifestId} → ${parsed.data.approved ? "approved" : "denied"}`);
 		return c.json({ status: parsed.data.approved ? "approved" : "denied" });
 	});
 
-	return { app, resolveConfirmation };
+	return { app, resolveConfirmation, emitConfirmation: confirmStream.emit };
 }

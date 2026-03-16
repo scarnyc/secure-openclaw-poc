@@ -3,6 +3,7 @@ import { type SentinelConfig, SentinelConfigSchema } from "@sentinel/types";
 
 const DEFAULT_CLASSIFICATIONS: ToolClassification[] = [
 	{ tool: "read_file", defaultCategory: "read" },
+	{ tool: "memory_search", defaultCategory: "read" },
 	{ tool: "bash", defaultCategory: "write" },
 	{
 		tool: "write_file",

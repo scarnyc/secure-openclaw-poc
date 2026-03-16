@@ -244,7 +244,7 @@ describe("Telegram getUpdates interception", () => {
 		expect(json.result).toHaveLength(1);
 		expect(json.result[0]).toEqual({ update_id: 100 });
 
-		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("manifest-abc", true);
+		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("manifest-abc", true, "telegram");
 		expect(interceptor.acknowledgeCallback).toHaveBeenCalledWith("cb1", "Approved", false);
 	});
 
@@ -306,7 +306,7 @@ describe("Telegram getUpdates interception", () => {
 		// Non-confirm callback passes through
 		expect(json.result[2]).toEqual(updates[2]);
 
-		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m1", false);
+		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m1", false, "telegram");
 	});
 
 	it("all-confirm response → all stubs with correct update_ids", async () => {
@@ -493,7 +493,7 @@ describe("Telegram getUpdates interception", () => {
 		expect(res.status).toBe(200);
 		const json = (await res.json()) as { ok: boolean; result: unknown[] };
 		expect(json.result[0]).toEqual({ update_id: 500 });
-		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m3", true);
+		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m3", true, "telegram");
 
 		// Wait for the fire-and-forget promise to settle
 		await vi.waitFor(() => {
@@ -545,7 +545,7 @@ describe("Telegram getUpdates interception", () => {
 
 		const json = (await res.json()) as { ok: boolean; result: unknown[] };
 		expect(json.result[0]).toEqual({ update_id: 700 });
-		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m5", true);
+		expect(interceptor.resolveConfirmation).toHaveBeenCalledWith("m5", true, "telegram");
 
 		// acknowledgeCallback should report "timed out" for unresolved
 		expect(interceptor.acknowledgeCallback).toHaveBeenCalledWith(
