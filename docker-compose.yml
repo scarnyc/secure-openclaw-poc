@@ -97,10 +97,7 @@ services:
       - SENTINEL_FAIL_MODE=closed
       - SENTINEL_DOCKER=true
       - SENTINEL_EGRESS_DOMAINS=${SENTINEL_EGRESS_DOMAINS:-api.telegram.org}
-      # Both executor and gateway poll Telegram (409 conflicts expected and handled).
-      # Executor polls for confirmation callbacks; gateway polls for user messages.
-      - SENTINEL_TELEGRAM_POLLER=${SENTINEL_TELEGRAM_POLLER:-executor}
-      - SENTINEL_TELEGRAM_BOT_TOKEN=${SENTINEL_TELEGRAM_BOT_TOKEN:-}
+      - SENTINEL_TELEGRAM_POLLER=${SENTINEL_TELEGRAM_POLLER:-gateway}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - NODE_ENV=production
     mem_limit: 2g

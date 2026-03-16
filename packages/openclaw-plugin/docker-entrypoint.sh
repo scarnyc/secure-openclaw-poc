@@ -40,7 +40,7 @@ cat > "${CONFIG_FILE}" << EOCFG
   },
   "channels": {
     "telegram": {
-      "botToken": "${SENTINEL_TELEGRAM_BOT_TOKEN:-SENTINEL_PLACEHOLDER_telegram_bot__key}",
+      "botToken": "SENTINEL_PLACEHOLDER_telegram_bot__key",
       "enabled": true,
       "dmPolicy": "pairing",
       "groupPolicy": "allowlist",
@@ -78,19 +78,6 @@ echo "[openclaw-gateway] Plugin: /app/plugin"
 # Start OpenClaw gateway (no self-respawn in container)
 echo "[openclaw-gateway] Starting OpenClaw gateway..."
 export OPENCLAW_NO_RESPAWN=1
-chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
-
-# SENTINEL: Route outbound HTTPS through executor's CONNECT proxy.
-# grammY uses undici's internal dispatcher (not globalThis.fetch), so our fetch
-# interceptor cannot catch its requests. HTTPS_PROXY is the only way to route
-# grammY's Telegram API calls through the executor to the internet.
-# The CONNECT tunnel is opaque — confirmation callbacks are handled by the
-# executor's own polling (SENTINEL_TELEGRAM_POLLER=executor).
-export HTTPS_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
-export HTTP_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
-export NO_PROXY="executor,localhost,127.0.0.1,0.0.0.0"
-echo "[openclaw-gateway] HTTPS_PROXY=${HTTPS_PROXY} (CONNECT tunnel through executor)"
-
 export NODE_OPTIONS="--max-old-space-size=1536"
-
+chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
 exec openclaw gateway run --port 18789 --bind lan --allow-unconfigured

@@ -147,13 +147,11 @@ const sentinelPlugin: OpenClawPluginDefinition = {
 		const pluginConfig = api.pluginConfig as Partial<PluginConfig> | undefined;
 		const plugin = createSentinelPlugin(pluginConfig);
 
-		// Install fetch interceptors based on deployment mode
+		// Install appropriate fetch interceptor based on deployment mode
 		let cleanupInterceptor: (() => void) | undefined;
 		if (pluginConfig?.executorUrl && pluginConfig?.authToken) {
 			if (process.env.SENTINEL_DOCKER) {
-				// Docker mode: fetch interceptor routes egress domains through executor's
-				// /proxy/egress REST endpoint. This enables credential injection, SSRF
-				// protection, and Telegram confirmation interception in getUpdates responses.
+				// Docker mode: route ALL egress through executor's /proxy/egress
 				const egressDomains = (process.env.SENTINEL_EGRESS_DOMAINS ?? "")
 					.split(",")
 					.filter(Boolean);
@@ -164,21 +162,8 @@ const sentinelPlugin: OpenClawPluginDefinition = {
 					agentId: "openclaw-gateway",
 					logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
 				});
-				// Telegram interceptor wraps the fetch interceptor (defense-in-depth).
-				// The executor's egress proxy handles primary confirmation interception;
-				// this layer catches any confirms the executor missed.
-				const telegramCleanup = installTelegramInterceptor({
-					executorUrl: pluginConfig.executorUrl,
-					authToken: pluginConfig.authToken,
-					logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
-				});
-				const originalCleanup = cleanupInterceptor;
-				cleanupInterceptor = () => {
-					telegramCleanup();
-					originalCleanup();
-				};
 				api.logger.info(
-					`[sentinel] Docker mode: CONNECT proxy + fetch interceptor (${egressDomains.length} domains) + Telegram forwarder`,
+					`[sentinel] Egress fetch interceptor installed (Docker mode, ${egressDomains.length} domains)`,
 				);
 			} else {
 				// Host mode: only intercept Telegram getUpdates for confirmation forwarding
@@ -188,52 +173,6 @@ const sentinelPlugin: OpenClawPluginDefinition = {
 					logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
 				});
 				api.logger.info("[sentinel] Telegram interceptor installed (host mode)");
-			}
-		}
-
-		// SENTINEL: Best-effort callback_query hook registration for confirmations.
-		// If OpenClaw fires a hook for Telegram callback queries, we catch confirmation
-		// callbacks directly (more reliable than fetch interception for node-fetch users).
-		if (pluginConfig?.executorUrl && pluginConfig?.authToken) {
-			const baseUrl = pluginConfig.executorUrl.replace(/\/+$/, "");
-			const token = pluginConfig.authToken;
-			const confirmRe = /^confirm:(.+):(approve|reject)$/;
-
-			const forwardConfirmation = (callbackData: string): void => {
-				const match = confirmRe.exec(callbackData);
-				if (!match) return;
-				const manifestId = match[1];
-				const approved = match[2] === "approve";
-				api.logger.info(
-					`[sentinel] Forwarding confirmation: manifestId=${manifestId} approved=${approved}`,
-				);
-				fetch(`${baseUrl}/confirm/${manifestId}`, {
-					method: "POST",
-					headers: {
-						"Content-Type": "application/json",
-						Authorization: `Bearer ${token}`,
-					},
-					body: JSON.stringify({ approved }),
-				}).catch((err: unknown) => {
-					api.logger.error(
-						`[sentinel] Confirmation forward failed: ${err instanceof Error ? err.message : "Unknown"}`,
-					);
-				});
-			};
-
-			// Try known hook names that might fire for Telegram callback queries
-			for (const hookName of ["callback_query", "telegram_callback_query", "update_received"]) {
-				try {
-					api.on(hookName, (event: Record<string, unknown>) => {
-						const cbq = event.callback_query as Record<string, unknown> | undefined;
-						const data = cbq?.data ?? event.data ?? event.callbackData;
-						if (typeof data === "string" && data.startsWith("confirm:")) {
-							forwardConfirmation(data);
-						}
-					});
-				} catch {
-					// Hook name not supported — silently skip
-				}
 			}
 		}
 
@@ -327,11 +266,11 @@ export function registerSentinelPlugin(
 	const pluginConfig = config ?? (api.pluginConfig as Partial<PluginConfig> | undefined);
 	const plugin = createSentinelPlugin(pluginConfig);
 
-	// Install fetch interceptors based on deployment mode
+	// Install appropriate fetch interceptor based on deployment mode
 	let cleanupInterceptor: (() => void) | undefined;
 	if (pluginConfig?.executorUrl && pluginConfig?.authToken) {
 		if (process.env.SENTINEL_DOCKER) {
-			// Docker mode: fetch interceptor routes egress through /proxy/egress
+			// Docker mode: route ALL egress through executor's /proxy/egress
 			const egressDomains = (process.env.SENTINEL_EGRESS_DOMAINS ?? "").split(",").filter(Boolean);
 			cleanupInterceptor = installFetchInterceptor({
 				executorUrl: pluginConfig.executorUrl,
@@ -340,16 +279,6 @@ export function registerSentinelPlugin(
 				agentId: "openclaw-gateway",
 				logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
 			});
-			const telegramCleanup = installTelegramInterceptor({
-				executorUrl: pluginConfig.executorUrl,
-				authToken: pluginConfig.authToken,
-				logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
-			});
-			const originalCleanup = cleanupInterceptor;
-			cleanupInterceptor = () => {
-				telegramCleanup();
-				originalCleanup();
-			};
 		} else {
 			// Host mode: only intercept Telegram getUpdates for confirmation forwarding
 			cleanupInterceptor = installTelegramInterceptor({

@@ -4,7 +4,6 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
-import { CredentialVault } from "@sentinel/crypto";
 
 function run(
 	projectRoot: string,
@@ -125,48 +124,24 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		{ serviceId: "telegram_bot", allowedDomains: ["api.telegram.org"] },
 	]);
 
-	// SENTINEL: Dual-poller mode — both executor and gateway poll Telegram.
-	// The CONNECT tunnel (HTTPS_PROXY) is opaque, so the executor can't intercept
-	// confirmation callbacks from getUpdates responses. The executor must poll
-	// separately to handle confirmations. 409 conflicts are expected and handled
-	// by both sides with retry logic.
+	// SENTINEL: Detect OpenClaw + Telegram setup to configure poller mode.
+	// When Telegram confirmations are enabled and OpenClaw is installed, the gateway
+	// should be the sole Telegram poller to avoid 409 conflicts (same bot token).
+	const telegramEnabled = Boolean(process.env.SENTINEL_TELEGRAM_CHAT_ID);
 	const openclawConfigPath = join(homedir(), ".openclaw", "openclaw.json");
-	const gatewayTargeted = targets.includes("openclaw-gateway");
+	const openclawInstalled = existsSync(openclawConfigPath);
+	const useGatewayPoller = telegramEnabled && openclawInstalled;
 
 	const composeEnv: Record<string, string> = {
 		SENTINEL_AUTH_TOKEN: authToken,
 		// Egress bindings: use host env override if set, otherwise default with Telegram
 		SENTINEL_EGRESS_BINDINGS: process.env.SENTINEL_EGRESS_BINDINGS || defaultEgressBindings,
-		// Executor polls for confirmations; gateway polls for messages (dual-poller)
-		SENTINEL_TELEGRAM_POLLER: "executor",
 	};
-	if (gatewayTargeted) {
+	if (useGatewayPoller) {
+		composeEnv.SENTINEL_TELEGRAM_POLLER = "gateway";
+		// Generate a shared gateway auth token for executor ↔ gateway communication
 		const gatewayToken = randomBytes(16).toString("hex");
 		composeEnv.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
-	}
-
-	// SENTINEL: Extract real bot token from vault for gateway injection.
-	// The CONNECT proxy tunnel is opaque — the executor can't substitute placeholders.
-	// Always try extraction when vault is available and gateway is targeted.
-	if (vaultPassword && gatewayTargeted) {
-		try {
-			const vaultPath = resolve(projectRoot, "data", "vault.enc");
-			const vault = await CredentialVault.open(vaultPath, vaultPassword);
-			const { useCredential } = await import("@sentinel/crypto");
-			const botToken = await useCredential(
-				vault,
-				"telegram_bot",
-				["key"] as const,
-				(cred) => cred.key,
-			);
-			composeEnv.SENTINEL_TELEGRAM_BOT_TOKEN = botToken;
-			console.log("Telegram bot token extracted from vault for gateway injection.");
-		} catch (err) {
-			console.warn(
-				`[sentinel] Could not extract bot token from vault: ${err instanceof Error ? err.message : "Unknown"}`,
-			);
-			console.warn("[sentinel] Gateway will use placeholder token (egress proxy will substitute).");
-		}
 	}
 	if (vaultPassword) {
 		composeEnv.SENTINEL_VAULT_PASSWORD = vaultPassword;
@@ -177,12 +152,12 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		`Auth token: ${authToken.slice(0, 8)}...${authToken.slice(-4)} (${authToken.length} chars)`,
 	);
 
-	// SENTINEL: Stop host gateway before Docker startup to prevent triple-poller conflicts.
-	// Docker executor + Docker gateway already dual-poll; a host gateway adds a third.
-	if (gatewayTargeted) {
+	// SENTINEL: Stop host gateway before Docker startup to prevent Telegram 409 conflicts.
+	// Both the host gateway and Docker executor may poll the same bot token simultaneously.
+	if (useGatewayPoller) {
 		try {
 			run(projectRoot, "openclaw", ["gateway", "stop"]);
-			console.log("Host-mode OpenClaw gateway stopped (preventing triple-poller conflicts).");
+			console.log("Host-mode OpenClaw gateway stopped (preventing Telegram 409 conflicts).");
 		} catch {
 			// openclaw CLI not installed or gateway not running — skip silently
 		}
@@ -282,9 +257,10 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	console.log(`\n${run(projectRoot, "docker", ["compose", "-f", composeFile, "ps"])}`);
 
 	// SENTINEL: Post-healthy gateway handling.
-	// Docker gateway + executor dual-poll — do NOT restart host gateway (would triple-poll).
-	if (gatewayTargeted) {
-		console.log("Docker gateway + executor dual-polling Telegram (host gateway not restarted).");
+	// In gateway poller mode, Docker gateway is the sole Telegram poller — do NOT restart host gateway.
+	// In standalone mode (no OpenClaw), restart host gateway for backward compat.
+	if (useGatewayPoller) {
+		console.log("Docker gateway is sole Telegram poller (host gateway stopped, not restarted).");
 	} else {
 		// Non-gateway mode: still restart gateway if installed (backward compat)
 		try {
