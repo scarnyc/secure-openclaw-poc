@@ -29,8 +29,11 @@ export function inferCategoryFromName(toolName: string): ActionCategory {
 	const segments = toolName.split("__");
 	const namePart = segments[segments.length - 1];
 
-	// Write tokens win over read tokens (fail-closed)
-	if (WRITE_NAME_TOKENS.test(namePart)) return "write";
+	// Write tokens win over read tokens (fail-closed).
+	// Also scan ALL segments — a write token anywhere escalates to write.
+	for (const segment of segments) {
+		if (WRITE_NAME_TOKENS.test(segment)) return "write";
+	}
 	if (READ_NAME_TOKENS.test(namePart)) return "read";
 
 	return "write";

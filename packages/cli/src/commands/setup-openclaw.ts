@@ -188,8 +188,10 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 		template = existsSync(templatePath)
 			? readFileSync(templatePath, "utf-8")
 			: readFileSync(fallbackTemplatePath, "utf-8");
-	} catch {
-		// Inline minimal template if file not found
+	} catch (err) {
+		console.warn(
+			`[setup-openclaw] SOUL.md template not found, using inline fallback: ${err instanceof Error ? err.message : String(err)}`,
+		);
 		template = [
 			"# Identity",
 			"",
@@ -255,14 +257,22 @@ export async function setupOpenclawCommand(dataDir: string): Promise<void> {
 	spin.start("Updating Sentinel configuration...");
 	const sentinelConfigPath = resolve(dataDir, "sentinel.json");
 	if (existsSync(sentinelConfigPath)) {
-		const sentinelRaw = readFileSync(sentinelConfigPath, "utf-8");
-		const sentinelConfig = JSON.parse(sentinelRaw) as Record<string, unknown>;
-		sentinelConfig.openclawPlugin = {
-			enabled: true,
-			executorUrl,
-			tier,
-		};
-		await writeFile(sentinelConfigPath, JSON.stringify(sentinelConfig, null, "\t"), "utf-8");
+		try {
+			const sentinelRaw = readFileSync(sentinelConfigPath, "utf-8");
+			const sentinelConfig = JSON.parse(sentinelRaw) as Record<string, unknown>;
+			sentinelConfig.openclawPlugin = {
+				enabled: true,
+				executorUrl,
+				tier,
+			};
+			await writeFile(sentinelConfigPath, JSON.stringify(sentinelConfig, null, "\t"), "utf-8");
+		} catch (err) {
+			console.warn(
+				`[setup-openclaw] Failed to update sentinel.json: ${err instanceof Error ? err.message : String(err)}`,
+			);
+		}
+	} else {
+		console.warn(`[setup-openclaw] sentinel.json not found at ${sentinelConfigPath} — skipping Sentinel config update`);
 	}
 	spin.stop("Sentinel configuration updated");
 

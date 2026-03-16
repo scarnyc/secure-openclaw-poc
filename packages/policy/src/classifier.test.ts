@@ -583,6 +583,12 @@ describe("classify", () => {
 			expect(inferCategoryFromName("mcp__api__delete_user")).toBe("write");
 		});
 
+		it("write token in any segment escalates to write (all-segment scan)", () => {
+			// Server name contains write token — escalate even if method is read-like
+			expect(inferCategoryFromName("mcp__delete_server__list_items")).toBe("write");
+			expect(inferCategoryFromName("mcp__execute_api__get_status")).toBe("write");
+		});
+
 		it("is case-insensitive", () => {
 			expect(inferCategoryFromName("LIST_USERS")).toBe("read");
 			expect(inferCategoryFromName("Search_Items")).toBe("read");
