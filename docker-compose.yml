@@ -23,6 +23,8 @@ services:
       - SENTINEL_EGRESS_BINDINGS=${SENTINEL_EGRESS_BINDINGS:-[]}
       # Telegram chat ID for confirmation delivery (optional — if unset, HTTP /confirm endpoint only)
       - SENTINEL_TELEGRAM_CHAT_ID=${SENTINEL_TELEGRAM_CHAT_ID:-}
+      # Telegram poller mode: "executor" (default) = executor polls; "gateway" = OpenClaw gateway polls
+      - SENTINEL_TELEGRAM_POLLER=${SENTINEL_TELEGRAM_POLLER:-executor}
     # SENTINEL: L6 — Container resource limits
     mem_limit: 512m
     cpus: "1.0"

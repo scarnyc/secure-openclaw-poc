@@ -1,4 +1,4 @@
-import { execFileSync, execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -124,11 +124,22 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		{ serviceId: "telegram_bot", allowedDomains: ["api.telegram.org"] },
 	]);
 
+	// SENTINEL: Detect OpenClaw + Telegram setup to configure poller mode.
+	// When Telegram confirmations are enabled and OpenClaw is installed, the gateway
+	// should be the sole Telegram poller to avoid 409 conflicts (same bot token).
+	const telegramEnabled = Boolean(process.env.SENTINEL_TELEGRAM_CHAT_ID);
+	const openclawConfigPath = join(homedir(), ".openclaw", "openclaw.json");
+	const openclawInstalled = existsSync(openclawConfigPath);
+	const useGatewayPoller = telegramEnabled && openclawInstalled;
+
 	const composeEnv: Record<string, string> = {
 		SENTINEL_AUTH_TOKEN: authToken,
 		// Egress bindings: use host env override if set, otherwise default with Telegram
 		SENTINEL_EGRESS_BINDINGS: process.env.SENTINEL_EGRESS_BINDINGS || defaultEgressBindings,
 	};
+	if (useGatewayPoller) {
+		composeEnv.SENTINEL_TELEGRAM_POLLER = "gateway";
+	}
 	if (vaultPassword) {
 		composeEnv.SENTINEL_VAULT_PASSWORD = vaultPassword;
 	}
@@ -137,6 +148,17 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	console.log(
 		`Auth token: ${authToken.slice(0, 8)}...${authToken.slice(-4)} (${authToken.length} chars)`,
 	);
+
+	// SENTINEL: Stop host gateway before Docker startup to prevent Telegram 409 conflicts.
+	// Both the host gateway and Docker executor may poll the same bot token simultaneously.
+	if (useGatewayPoller) {
+		try {
+			run(projectRoot, "openclaw", ["gateway", "stop"]);
+			console.log("Host-mode OpenClaw gateway stopped (preventing Telegram 409 conflicts).");
+		} catch {
+			// openclaw CLI not installed or gateway not running — skip silently
+		}
+	}
 
 	// Build images
 	console.log("Building Docker images...");
@@ -174,7 +196,6 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 
 	// SENTINEL: Sync auth token into host OpenClaw config so LLM proxy calls authenticate.
 	// OpenClaw stores the executor token in models.providers.sentinel-openai.apiKey.
-	const openclawConfigPath = join(homedir(), ".openclaw", "openclaw.json");
 	if (existsSync(openclawConfigPath)) {
 		try {
 			const raw = readFileSync(openclawConfigPath, "utf-8");
@@ -185,7 +206,7 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 				let updated = false;
 				for (const [name, provider] of Object.entries(providers)) {
 					const baseUrl = provider.baseUrl as string | undefined;
-					if (baseUrl && baseUrl.includes("localhost:3141")) {
+					if (baseUrl?.includes("localhost:3141")) {
 						provider.apiKey = authToken;
 						updated = true;
 						console.log(`Updated ${name} provider apiKey in openclaw.json`);
@@ -230,14 +251,27 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	}
 
 	// Show final status
-	console.log("\n" + run(projectRoot, "docker", ["compose", "-f", composeFile, "ps"]));
+	console.log(`\n${run(projectRoot, "docker", ["compose", "-f", composeFile, "ps"])}`);
 
-	// Restart host-mode OpenClaw gateway if installed (fallback for non-Docker OpenClaw)
-	try {
-		run(projectRoot, "openclaw", ["gateway", "restart"]);
-		console.log("Host-mode OpenClaw gateway restarted.");
-	} catch {
-		// openclaw CLI not installed or gateway not running — skip silently
+	// SENTINEL: Restart host gateway as sole Telegram poller after executor is healthy.
+	// Only in gateway poller mode — executor polling is disabled via SENTINEL_TELEGRAM_POLLER=gateway.
+	if (useGatewayPoller) {
+		try {
+			run(projectRoot, "openclaw", ["gateway", "restart"]);
+			console.log("Host-mode OpenClaw gateway restarted (sole Telegram poller).");
+		} catch {
+			console.warn(
+				"[sentinel] Failed to restart OpenClaw gateway — Telegram confirmations may not work.",
+			);
+		}
+	} else {
+		// Non-gateway mode: still restart gateway if installed (backward compat)
+		try {
+			run(projectRoot, "openclaw", ["gateway", "restart"]);
+			console.log("Host-mode OpenClaw gateway restarted.");
+		} catch {
+			// openclaw CLI not installed or gateway not running — skip silently
+		}
 	}
 
 	console.log("\nSentinel is running.");

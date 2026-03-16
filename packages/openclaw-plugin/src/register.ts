@@ -1,5 +1,6 @@
 import type { PluginConfig } from "./config.js";
 import { createSentinelPlugin } from "./index.js";
+import { installTelegramInterceptor } from "./telegram-interceptor.js";
 
 // ---------------------------------------------------------------------------
 // OpenClaw Plugin SDK types — aligned with openclaw/dist/plugin-sdk/plugins/types.d.ts
@@ -145,6 +146,18 @@ const sentinelPlugin: OpenClawPluginDefinition = {
 		const pluginConfig = api.pluginConfig as Partial<PluginConfig> | undefined;
 		const plugin = createSentinelPlugin(pluginConfig);
 
+		// Install Telegram interceptor for host deployment
+		// (in Docker, egress proxy handles confirmation forwarding)
+		let cleanupInterceptor: (() => void) | undefined;
+		if (!process.env.SENTINEL_DOCKER && pluginConfig?.executorUrl && pluginConfig?.authToken) {
+			cleanupInterceptor = installTelegramInterceptor({
+				executorUrl: pluginConfig.executorUrl,
+				authToken: pluginConfig.authToken,
+				logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
+			});
+			api.logger.info("[sentinel] Telegram interceptor installed (host mode)");
+		}
+
 		api.logger.info("[sentinel] Registering security hooks...");
 
 		// before_tool_call — classify and optionally block tool calls
@@ -210,6 +223,7 @@ const sentinelPlugin: OpenClawPluginDefinition = {
 		api.on(
 			"gateway_stop",
 			(_event: PluginHookGatewayStopEvent, _ctx: PluginHookGatewayContext): void => {
+				cleanupInterceptor?.();
 				plugin.stop();
 				api.logger.info("[sentinel] Plugin stopped");
 			},
@@ -233,6 +247,16 @@ export function registerSentinelPlugin(
 ): void {
 	const pluginConfig = config ?? (api.pluginConfig as Partial<PluginConfig> | undefined);
 	const plugin = createSentinelPlugin(pluginConfig);
+
+	// Install Telegram interceptor for host deployment
+	let cleanupInterceptor: (() => void) | undefined;
+	if (!process.env.SENTINEL_DOCKER && pluginConfig?.executorUrl && pluginConfig?.authToken) {
+		cleanupInterceptor = installTelegramInterceptor({
+			executorUrl: pluginConfig.executorUrl,
+			authToken: pluginConfig.authToken,
+			logger: (msg) => api.logger.info(`[sentinel] ${msg}`),
+		});
+	}
 
 	api.on(
 		"before_tool_call",
@@ -288,6 +312,7 @@ export function registerSentinelPlugin(
 	api.on(
 		"gateway_stop",
 		(_event: PluginHookGatewayStopEvent, _ctx: PluginHookGatewayContext): void => {
+			cleanupInterceptor?.();
 			plugin.stop();
 		},
 	);

@@ -76,6 +76,15 @@ export class ExecutorClient {
 		return (await res.json()) as ConfirmOnlyResponse;
 	}
 
+	/**
+	 * Resolve a pending confirmation by manifest ID.
+	 * Used by the Telegram interceptor to forward callback approvals/rejections.
+	 */
+	async confirm(manifestId: string, approved: boolean): Promise<boolean> {
+		const res = await this.post(`/confirm/${manifestId}`, { approved });
+		return res.ok;
+	}
+
 	async health(): Promise<boolean> {
 		try {
 			const res = await this.get("/health");

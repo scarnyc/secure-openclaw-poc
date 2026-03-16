@@ -155,9 +155,20 @@ serve({ fetch: app.fetch, port, hostname: host }, () => {
 		if (hasTelegramBinding) {
 			console.log("[sentinel] Telegram egress proxy interception active (Docker mode)");
 		}
-		// SENTINEL: Always start fallback polling — handles hybrid deployment
-		// (host OpenClaw + Docker executor) where egress interception can't fire.
-		// Both paths use the same resolveConfirmation — idempotent (Map.delete on first, false on second).
-		telegramAdapter.startFallbackPolling(resolveConfirmation);
+		// SENTINEL_TELEGRAM_POLLER controls who polls Telegram:
+		// - "executor" (default): executor runs fallback polling (standalone Sentinel mode)
+		// - "gateway": OpenClaw gateway is the sole poller; plugin forwards callbacks via interceptor
+		const telegramPoller = process.env.SENTINEL_TELEGRAM_POLLER ?? "executor";
+		if (telegramPoller === "executor") {
+			telegramAdapter.startFallbackPolling(resolveConfirmation);
+			console.log(
+				"[entrypoint] Telegram fallback polling started (SENTINEL_TELEGRAM_POLLER=executor)",
+			);
+		} else {
+			console.log(
+				`[entrypoint] Telegram fallback polling disabled (SENTINEL_TELEGRAM_POLLER=${telegramPoller})`,
+			);
+			console.log("[entrypoint] Confirmations will be forwarded by OpenClaw plugin interceptor");
+		}
 	}
 });
