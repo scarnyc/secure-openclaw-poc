@@ -125,13 +125,15 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		{ serviceId: "telegram_bot", allowedDomains: ["api.telegram.org"] },
 	]);
 
-	// SENTINEL: Detect OpenClaw + Telegram setup to configure poller mode.
-	// When Telegram confirmations are enabled and OpenClaw is installed, the gateway
-	// should be the sole Telegram poller to avoid 409 conflicts (same bot token).
-	const telegramEnabled = Boolean(process.env.SENTINEL_TELEGRAM_CHAT_ID);
+	// SENTINEL: Detect gateway poller mode.
+	// When the openclaw-gateway target is included, the gateway should be the sole
+	// Telegram poller to avoid 409 conflicts (same bot token, two pollers).
+	// Previously required SENTINEL_TELEGRAM_CHAT_ID in host env — now auto-detects
+	// from vault presence + gateway target.
 	const openclawConfigPath = join(homedir(), ".openclaw", "openclaw.json");
 	const openclawInstalled = existsSync(openclawConfigPath);
-	const useGatewayPoller = telegramEnabled && openclawInstalled;
+	const gatewayTargeted = targets.includes("openclaw-gateway");
+	const useGatewayPoller = gatewayTargeted || (Boolean(process.env.SENTINEL_TELEGRAM_CHAT_ID) && openclawInstalled);
 
 	const composeEnv: Record<string, string> = {
 		SENTINEL_AUTH_TOKEN: authToken,
@@ -143,29 +145,29 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		// Generate a shared gateway auth token for executor ↔ gateway communication
 		const gatewayToken = randomBytes(16).toString("hex");
 		composeEnv.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
+	}
 
-		// SENTINEL: Extract real bot token from vault for gateway injection.
-		// The gateway needs the actual token (not a placeholder) because the CONNECT
-		// proxy tunnel is opaque — the executor can't substitute placeholders.
-		if (vaultPassword) {
-			try {
-				const vaultPath = resolve(projectRoot, "data", "vault.enc");
-				const vault = await CredentialVault.open(vaultPath, vaultPassword);
-				const { useCredential } = await import("@sentinel/crypto");
-				const botToken = await useCredential(
-					vault,
-					"telegram_bot",
-					["key"] as const,
-					(cred) => cred.key,
-				);
-				composeEnv.SENTINEL_TELEGRAM_BOT_TOKEN = botToken;
-				console.log("Telegram bot token extracted from vault for gateway injection.");
-			} catch (err) {
-				console.warn(
-					`[sentinel] Could not extract bot token from vault: ${err instanceof Error ? err.message : "Unknown"}`,
-				);
-				console.warn("[sentinel] Gateway will use placeholder token (egress proxy substitution).");
-			}
+	// SENTINEL: Extract real bot token from vault for gateway injection.
+	// The CONNECT proxy tunnel is opaque — the executor can't substitute placeholders.
+	// Always try extraction when vault is available and gateway is targeted.
+	if (vaultPassword && gatewayTargeted) {
+		try {
+			const vaultPath = resolve(projectRoot, "data", "vault.enc");
+			const vault = await CredentialVault.open(vaultPath, vaultPassword);
+			const { useCredential } = await import("@sentinel/crypto");
+			const botToken = await useCredential(
+				vault,
+				"telegram_bot",
+				["key"] as const,
+				(cred) => cred.key,
+			);
+			composeEnv.SENTINEL_TELEGRAM_BOT_TOKEN = botToken;
+			console.log("Telegram bot token extracted from vault for gateway injection.");
+		} catch (err) {
+			console.warn(
+				`[sentinel] Could not extract bot token from vault: ${err instanceof Error ? err.message : "Unknown"}`,
+			);
+			console.warn("[sentinel] Gateway will use placeholder token (egress proxy will substitute).");
 		}
 	}
 	if (vaultPassword) {
