@@ -1,6 +1,6 @@
-import { execFileSync, execSync } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
@@ -100,6 +100,116 @@ async function promptPassword(): Promise<string> {
 	});
 }
 
+/**
+ * Start a Cloudflare quick tunnel to expose the executor publicly.
+ * Returns the public URL and the child process (for cleanup).
+ * Falls back gracefully if cloudflared is not installed.
+ */
+async function startTunnel(
+	projectRoot: string,
+	port: number,
+): Promise<{ url: string; process: ChildProcess } | null> {
+	// Skip if user explicitly set a confirm base URL
+	if (process.env.SENTINEL_CONFIRM_BASE_URL) {
+		console.log(
+			`[tunnel] Using explicit SENTINEL_CONFIRM_BASE_URL: ${process.env.SENTINEL_CONFIRM_BASE_URL}`,
+		);
+		return null;
+	}
+
+	// Check if cloudflared is installed
+	try {
+		execFileSync("which", ["cloudflared"], { encoding: "utf-8" });
+	} catch {
+		console.log("[tunnel] cloudflared not installed — confirmation links will use localhost.");
+		console.log("[tunnel] Install with: brew install cloudflared");
+		return null;
+	}
+
+	console.log("[tunnel] Starting Cloudflare tunnel...");
+
+	const child = spawn("cloudflared", ["tunnel", "--url", `http://localhost:${port}`], {
+		stdio: ["ignore", "pipe", "pipe"],
+		detached: true,
+	});
+
+	// Save PID for cleanup on stop
+	const pidPath = join(projectRoot, "data", "cloudflared.pid");
+	writeFileSync(pidPath, String(child.pid), "utf-8");
+
+	// Parse the tunnel URL from cloudflared stderr output
+	// cloudflared prints: INF +--- https://random.trycloudflare.com ---+
+	const url = await new Promise<string | null>((resolvePromise) => {
+		const timeout = setTimeout(() => {
+			console.warn("[tunnel] Timed out waiting for tunnel URL (15s)");
+			resolvePromise(null);
+		}, 15_000);
+
+		let stderrBuffer = "";
+
+		child.stderr?.on("data", (chunk: Buffer) => {
+			stderrBuffer += chunk.toString();
+			const match = stderrBuffer.match(/https:\/\/[a-z0-9-]+\.trycloudflare\.com/);
+			if (match) {
+				clearTimeout(timeout);
+				resolvePromise(match[0]);
+			}
+		});
+
+		child.on("error", (err) => {
+			clearTimeout(timeout);
+			console.error(`[tunnel] Failed to start: ${err.message}`);
+			resolvePromise(null);
+		});
+
+		child.on("exit", (code) => {
+			if (code !== null && code !== 0) {
+				clearTimeout(timeout);
+				console.error(`[tunnel] Exited with code ${code}`);
+				resolvePromise(null);
+			}
+		});
+	});
+
+	if (!url) {
+		child.kill();
+		try {
+			unlinkSync(pidPath);
+		} catch {}
+		return null;
+	}
+
+	// Unref so tunnel doesn't prevent CLI from exiting
+	child.unref();
+
+	console.log(`[tunnel] Public URL: ${url}`);
+	return { url, process: child };
+}
+
+function stopTunnel(projectRoot: string): void {
+	const pidPath = join(projectRoot, "data", "cloudflared.pid");
+	if (!existsSync(pidPath)) return;
+
+	try {
+		const pid = Number.parseInt(readFileSync(pidPath, "utf-8").trim(), 10);
+		if (!Number.isNaN(pid)) {
+			process.kill(pid, "SIGTERM");
+			console.log(`[tunnel] Stopped cloudflared (PID ${pid})`);
+		}
+	} catch (err) {
+		// Process may already be gone
+		if ((err as NodeJS.ErrnoException).code !== "ESRCH") {
+			console.warn(
+				`[tunnel] Failed to stop cloudflared: ${err instanceof Error ? err.message : "Unknown"}`,
+			);
+		}
+	}
+
+	try {
+		unlinkSync(pidPath);
+	} catch {}
+}
+
 export async function startCommand(projectRoot: string, services: string[]): Promise<void> {
 	const composeFile = resolve(projectRoot, "docker-compose.yml");
 	const targets = services.length > 0 ? services : ["executor", "openclaw-gateway"];
@@ -124,8 +234,15 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		{ serviceId: "telegram_bot", allowedDomains: ["api.telegram.org"] },
 	]);
 
+	// SENTINEL: Start Cloudflare tunnel for public confirmation URLs
+	const tunnel = targets.includes("executor") ? await startTunnel(projectRoot, 3141) : null;
+
+	const confirmBaseUrl =
+		process.env.SENTINEL_CONFIRM_BASE_URL ?? tunnel?.url ?? "http://localhost:3141";
+
 	const composeEnv: Record<string, string> = {
 		SENTINEL_AUTH_TOKEN: authToken,
+		SENTINEL_CONFIRM_BASE_URL: confirmBaseUrl,
 		// Egress bindings: use host env override if set, otherwise default with Telegram
 		SENTINEL_EGRESS_BINDINGS: process.env.SENTINEL_EGRESS_BINDINGS || defaultEgressBindings,
 	};
@@ -241,11 +358,19 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	}
 
 	console.log("\nSentinel is running.");
+	console.log(`Confirmation UI: ${confirmBaseUrl}/confirm-ui/<manifestId>`);
+	if (tunnel) {
+		console.log("Cloudflare tunnel active — confirmations accessible from any device.");
+	}
 }
 
 export async function stopCommand(projectRoot: string): Promise<void> {
 	const composeFile = resolve(projectRoot, "docker-compose.yml");
 	console.log("Stopping Sentinel...");
+
+	// Stop tunnel first
+	stopTunnel(projectRoot);
+
 	try {
 		run(projectRoot, "docker", ["compose", "-f", composeFile, "down"]);
 		console.log("Sentinel stopped.");
