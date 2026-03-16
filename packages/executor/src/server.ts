@@ -78,7 +78,15 @@ export function createApp(
 	// SENTINEL: Shared confirmation resolver — used by HTTP endpoint, egress proxy, and web UI
 	function resolveConfirmation(manifestId: string, approved: boolean): boolean {
 		const pending = pendingConfirmations.get(manifestId);
-		if (!pending) return false;
+		if (!pending) {
+			console.warn(
+				`[confirm] Resolution attempted for ${manifestId} (approved=${approved}) but no pending confirmation found — may have timed out or already resolved`,
+			);
+			return false;
+		}
+		console.log(
+			`[confirm] Resolving ${manifestId} (tool=${pending.manifest.tool}, approved=${approved})`,
+		);
 		pendingConfirmations.delete(manifestId);
 		pending.resolve(approved);
 
@@ -440,18 +448,22 @@ export function createApp(
 
 	app.post("/confirm/:manifestId", async (c) => {
 		const { manifestId } = c.req.param();
+		console.log(`[confirm] POST /confirm/${manifestId} received`);
 
 		const raw = await c.req.json();
 		const parsed = ConfirmBodySchema.safeParse(raw);
 		if (!parsed.success) {
+			console.warn(`[confirm] Invalid body for ${manifestId}: ${parsed.error.message}`);
 			return c.json({ error: "Invalid body: expected { approved: boolean }" }, 400);
 		}
 
 		const resolved = resolveConfirmation(manifestId, parsed.data.approved);
 		if (!resolved) {
+			console.warn(`[confirm] 404 for ${manifestId} — not in pending map`);
 			return c.json({ error: "No pending confirmation found" }, 404);
 		}
 
+		console.log(`[confirm] ${manifestId} → ${parsed.data.approved ? "approved" : "denied"}`);
 		return c.json({ status: parsed.data.approved ? "approved" : "denied" });
 	});
 
