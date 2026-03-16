@@ -68,11 +68,15 @@ export function createSentinelPlugin(config?: Partial<PluginConfig>): SentinelPl
 			try {
 				const manifest = buildManifest(ctx.toolName, ctx.params, ctx.runId, ctx.session);
 
+				console.log(`[sentinel-plugin] Classifying ${ctx.toolName}...`);
 				const response = await client.classify(
 					manifest.tool,
 					manifest.parameters,
 					manifest.agentId,
 					manifest.sessionId,
+				);
+				console.log(
+					`[sentinel-plugin] Classification: ${response.decision} (category=${response.category})`,
 				);
 
 				if (response.decision === "block") {
@@ -80,12 +84,15 @@ export function createSentinelPlugin(config?: Partial<PluginConfig>): SentinelPl
 				}
 
 				if (response.decision === "confirm") {
-					// Route through executor's TUI confirmation flow (classify + confirm, no execution)
+					console.log(`[sentinel-plugin] Awaiting confirmation for ${ctx.toolName}...`);
 					const confirmResult = await client.confirmOnly(
 						manifest.tool,
 						manifest.parameters,
 						manifest.agentId,
 						manifest.sessionId,
+					);
+					console.log(
+						`[sentinel-plugin] Confirmation result: ${confirmResult.decision} (manifestId=${confirmResult.manifestId})`,
 					);
 					if (confirmResult.decision === "denied" || confirmResult.decision === "block") {
 						return {
@@ -101,7 +108,7 @@ export function createSentinelPlugin(config?: Partial<PluginConfig>): SentinelPl
 			} catch (error) {
 				const errMsg = error instanceof Error ? error.message : "Unknown";
 				// SENTINEL: Always log classification errors, even in fail-open (HIGH-2 security fix)
-				console.error(`[sentinel-plugin] Classification error: ${errMsg}`);
+				console.error(`[sentinel-plugin] Classification error for ${ctx.toolName}: ${errMsg}`);
 				if (resolved.failMode === "closed") {
 					return {
 						block: true,
