@@ -40,7 +40,7 @@ cat > "${CONFIG_FILE}" << EOCFG
   },
   "channels": {
     "telegram": {
-      "botToken": "SENTINEL_PLACEHOLDER_telegram_bot__key",
+      "botToken": "${SENTINEL_TELEGRAM_BOT_TOKEN:-SENTINEL_PLACEHOLDER_telegram_bot__key}",
       "enabled": true,
       "dmPolicy": "pairing",
       "groupPolicy": "allowlist",
@@ -80,4 +80,15 @@ echo "[openclaw-gateway] Starting OpenClaw gateway..."
 export OPENCLAW_NO_RESPAWN=1
 export NODE_OPTIONS="--max-old-space-size=1536"
 chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
+
+# SENTINEL: Route outbound HTTPS through executor's CONNECT proxy.
+# OpenClaw's resolveProxyFetchFromEnv() reads HTTPS_PROXY and creates an undici
+# ProxyAgent that sends CONNECT to the executor. This enables grammY (which uses
+# node-fetch, not globalThis.fetch) to reach api.telegram.org through the tunnel.
+# NO_PROXY excludes internal hosts that should bypass the proxy.
+export HTTPS_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
+export HTTP_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
+export NO_PROXY="executor,localhost,127.0.0.1,0.0.0.0"
+echo "[openclaw-gateway] HTTPS_PROXY=${HTTPS_PROXY} (CONNECT tunnel through executor)"
+
 exec openclaw gateway run --port 18789 --bind lan --allow-unconfigured

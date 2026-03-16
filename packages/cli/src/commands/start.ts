@@ -4,6 +4,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline";
+import { CredentialVault } from "@sentinel/crypto";
 
 function run(
 	projectRoot: string,
@@ -142,6 +143,30 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 		// Generate a shared gateway auth token for executor ↔ gateway communication
 		const gatewayToken = randomBytes(16).toString("hex");
 		composeEnv.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
+
+		// SENTINEL: Extract real bot token from vault for gateway injection.
+		// The gateway needs the actual token (not a placeholder) because the CONNECT
+		// proxy tunnel is opaque — the executor can't substitute placeholders.
+		if (vaultPassword) {
+			try {
+				const vaultPath = resolve(projectRoot, "data", "vault.enc");
+				const vault = await CredentialVault.open(vaultPath, vaultPassword);
+				const { useCredential } = await import("@sentinel/crypto");
+				const botToken = await useCredential(
+					vault,
+					"telegram_bot",
+					["key"] as const,
+					(cred) => cred.key,
+				);
+				composeEnv.SENTINEL_TELEGRAM_BOT_TOKEN = botToken;
+				console.log("Telegram bot token extracted from vault for gateway injection.");
+			} catch (err) {
+				console.warn(
+					`[sentinel] Could not extract bot token from vault: ${err instanceof Error ? err.message : "Unknown"}`,
+				);
+				console.warn("[sentinel] Gateway will use placeholder token (egress proxy substitution).");
+			}
+		}
 	}
 	if (vaultPassword) {
 		composeEnv.SENTINEL_VAULT_PASSWORD = vaultPassword;

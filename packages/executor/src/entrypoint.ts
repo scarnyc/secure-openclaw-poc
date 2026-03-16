@@ -3,6 +3,7 @@ import { AuditLogger } from "@sentinel/audit";
 import { CredentialVault } from "@sentinel/crypto";
 import { getDefaultConfig, validateConfig } from "@sentinel/policy";
 import type { EgressBinding } from "@sentinel/types";
+import { initConnectProxy } from "./connect-proxy.js";
 import { ensureDockerAuth } from "./docker-auth.js";
 import { applyDockerDefaults } from "./docker-defaults.js";
 import { createApp } from "./server.js";
@@ -146,7 +147,7 @@ const { app, resolveConfirmation } = createApp(
 const port = config.executor.port;
 const host = "0.0.0.0";
 
-serve({ fetch: app.fetch, port, hostname: host }, () => {
+const server = serve({ fetch: app.fetch, port, hostname: host }, () => {
 	console.log(`Sentinel Executor listening on http://${host}:${port}`);
 	if (telegramAdapter) {
 		const hasTelegramBinding = egressBindings.some((b) =>
@@ -172,3 +173,11 @@ serve({ fetch: app.fetch, port, hostname: host }, () => {
 		}
 	}
 });
+
+// SENTINEL: Attach CONNECT proxy for gateway HTTPS tunneling.
+// Runs on the same port as the HTTP server. The gateway uses HTTPS_PROXY=http://executor:3141
+// to route outbound HTTPS through this tunnel (e.g., Telegram API calls via grammY).
+const connectDomains = egressBindings.flatMap((b) => b.allowedDomains);
+if (connectDomains.length > 0) {
+	initConnectProxy(server, connectDomains, auditLogger);
+}
