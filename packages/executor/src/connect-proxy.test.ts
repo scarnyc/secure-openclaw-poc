@@ -226,7 +226,7 @@ describe("connect-proxy", () => {
 
 		it("passes without auth when authToken is undefined", async () => {
 			const targetSocket = createMockSocket();
-			mockNetConnect.mockImplementation((_port: number, _host: string, cb: () => void) => {
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
 				// Don't call cb yet — just return the mock socket
 				return targetSocket;
 			});
@@ -245,7 +245,7 @@ describe("connect-proxy", () => {
 	});
 
 	describe("domain allowlist", () => {
-		it("rejects domain not in allowlist", async () => {
+		it("rejects domain not in allowlist with generic Forbidden", async () => {
 			const { handler, auditLogger } = createHandler();
 			const clientSocket = createMockSocket();
 			const req = createMockReq("evil.example.com:443", {
@@ -255,7 +255,9 @@ describe("connect-proxy", () => {
 			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
 
 			expect(clientSocket.writtenData[0]).toContain("403");
-			expect(clientSocket.writtenData[0]).toContain("evil.example.com");
+			expect(clientSocket.writtenData[0]).toContain("Forbidden");
+			// Must NOT leak hostname in response
+			expect(clientSocket.writtenData[0]).not.toContain("evil.example.com");
 			expect(auditLogger.log).toHaveBeenCalledWith(
 				expect.objectContaining({
 					decision: "block",
@@ -330,7 +332,7 @@ describe("connect-proxy", () => {
 		it("establishes tunnel with 200 response, pipes, and clears timeouts", async () => {
 			let connectCallback: (() => void) | undefined;
 			const targetSocket = createMockSocket();
-			mockNetConnect.mockImplementation((_port: number, _host: string, cb: () => void) => {
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
 				connectCallback = cb;
 				return targetSocket;
 			});
@@ -377,7 +379,7 @@ describe("connect-proxy", () => {
 		it("does not forward head when buffer is empty", async () => {
 			let connectCallback: (() => void) | undefined;
 			const targetSocket = createMockSocket();
-			mockNetConnect.mockImplementation((_port: number, _host: string, cb: () => void) => {
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
 				connectCallback = cb;
 				return targetSocket;
 			});
@@ -417,11 +419,26 @@ describe("connect-proxy", () => {
 
 			// Trigger timeout
 			expect(timeoutCallback).toBeDefined();
+
+			// Track call order to verify write-before-destroy
+			const callOrder: string[] = [];
+			clientSocket.write.mockImplementation((data: string) => {
+				callOrder.push("write");
+				clientSocket.writtenData.push(data);
+				return true;
+			});
+			targetSocket.destroy.mockImplementation(() => {
+				callOrder.push("destroy");
+				targetSocket.destroyed = true;
+			});
+
 			timeoutCallback!();
 
-			expect(targetSocket.destroy).toHaveBeenCalled();
 			expect(clientSocket.writtenData[0]).toContain("504");
 			expect(clientSocket.writtenData[0]).toContain("Gateway Timeout");
+			expect(targetSocket.destroy).toHaveBeenCalled();
+			// Write must happen before destroy to avoid race
+			expect(callOrder.indexOf("write")).toBeLessThan(callOrder.indexOf("destroy"));
 			expect(auditLogger.log).toHaveBeenCalledWith(
 				expect.objectContaining({
 					decision: "auto_approve",
@@ -477,7 +494,7 @@ describe("connect-proxy", () => {
 		it("destroys peer on close", async () => {
 			let connectCallback: (() => void) | undefined;
 			const targetSocket = createMockSocket();
-			mockNetConnect.mockImplementation((_port: number, _host: string, cb: () => void) => {
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
 				connectCallback = cb;
 				return targetSocket;
 			});
@@ -505,7 +522,7 @@ describe("connect-proxy", () => {
 		it("logs all required fields for successful tunnel", async () => {
 			let connectCallback: (() => void) | undefined;
 			const targetSocket = createMockSocket();
-			mockNetConnect.mockImplementation((_port: number, _host: string, cb: () => void) => {
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
 				connectCallback = cb;
 				return targetSocket;
 			});
@@ -570,6 +587,157 @@ describe("connect-proxy", () => {
 
 			// First setTimeout call should be the 10s connect-phase timeout
 			expect(targetSocket.setTimeout).toHaveBeenCalledWith(10_000, expect.any(Function));
+		});
+	});
+
+	describe("writeReject on destroyed socket", () => {
+		it("does not throw when socket is already destroyed", async () => {
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			clientSocket.destroyed = true;
+			const req = createMockReq("no-port");
+
+			// Should not throw even when socket is already destroyed
+			await expect(
+				handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0)),
+			).resolves.toBeUndefined();
+			// write should NOT have been called on a destroyed socket
+			expect(clientSocket.write).not.toHaveBeenCalled();
+		});
+
+		it("does not throw when socket.write throws", async () => {
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			clientSocket.write.mockImplementation(() => {
+				throw new Error("Socket closed");
+			});
+			const req = createMockReq("no-port");
+
+			await expect(
+				handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0)),
+			).resolves.toBeUndefined();
+		});
+	});
+
+	describe("malformed Bearer header", () => {
+		it("rejects empty token after Bearer prefix", async () => {
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("api.telegram.org:443", {
+				"proxy-authorization": "Bearer ",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			expect(clientSocket.writtenData[0]).toContain("407");
+		});
+
+		it("rejects double space in Bearer header", async () => {
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("api.telegram.org:443", {
+				"proxy-authorization": "Bearer  token",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			expect(clientSocket.writtenData[0]).toContain("407");
+		});
+	});
+
+	describe("IPv6 CONNECT target", () => {
+		it("rejects [::1]:443 — brackets in hostname fail allowlist", async () => {
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("[::1]:443", {
+				"proxy-authorization": "Bearer test-secret-token",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			expect(clientSocket.writtenData[0]).toContain("403");
+		});
+	});
+
+	describe("empty egress bindings", () => {
+		it("rejects all requests with 403 (fail-closed)", async () => {
+			const { handler } = createHandler({ egressBindings: [] });
+			const clientSocket = createMockSocket();
+			const req = createMockReq("api.telegram.org:443", {
+				"proxy-authorization": "Bearer test-secret-token",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			expect(clientSocket.writtenData[0]).toContain("403");
+			expect(mockNetConnect).not.toHaveBeenCalled();
+		});
+	});
+
+	describe("agentId from X-Sentinel-Agent-Id header", () => {
+		it("uses header value in audit log", async () => {
+			let connectCallback: (() => void) | undefined;
+			const targetSocket = createMockSocket();
+			mockNetConnect.mockImplementation((_port: number, _ip: string, cb: () => void) => {
+				connectCallback = cb;
+				return targetSocket;
+			});
+
+			const { handler, auditLogger } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("api.telegram.org:443", {
+				"proxy-authorization": "Bearer test-secret-token",
+				"x-sentinel-agent-id": "agent-007",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+			connectCallback!();
+
+			expect(auditLogger.log).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: "agent-007",
+					decision: "auto_approve",
+					result: "success",
+				}),
+			);
+		});
+
+		it("falls back to 'unknown' when header is absent", async () => {
+			const { handler, auditLogger } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("evil.example.com:443", {
+				"proxy-authorization": "Bearer test-secret-token",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			expect(auditLogger.log).toHaveBeenCalledWith(
+				expect.objectContaining({
+					agentId: "unknown",
+				}),
+			);
+		});
+	});
+
+	describe("DNS-pinned connection", () => {
+		it("calls net.connect with resolved IP, not hostname", async () => {
+			mockCheckSsrf.mockResolvedValue({
+				resolvedIps: ["93.184.216.34"],
+				hostname: "api.telegram.org",
+			});
+			const targetSocket = createMockSocket();
+			mockNetConnect.mockImplementation(() => targetSocket);
+
+			const { handler } = createHandler();
+			const clientSocket = createMockSocket();
+			const req = createMockReq("api.telegram.org:443", {
+				"proxy-authorization": "Bearer test-secret-token",
+			});
+
+			await handler(req, clientSocket as unknown as Duplex, Buffer.alloc(0));
+
+			// Must connect to the resolved IP, not the hostname
+			expect(mockNetConnect).toHaveBeenCalledWith(443, "93.184.216.34", expect.any(Function));
 		});
 	});
 });

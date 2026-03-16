@@ -1,7 +1,16 @@
+/**
+ * Response types intentionally duplicated from @sentinel/types (zero-dependency SDK).
+ * Source of truth: packages/types/src/classify.ts, packages/types/src/filter-output.ts
+ * Keep in sync manually — check upstream on major version bumps.
+ */
+
+type ActionCategory = "read" | "write" | "write-irreversible" | "dangerous";
+
 /** Classification response from /classify */
 export interface ClassifyResponse {
-	action: "auto_approve" | "confirm" | "block";
-	category: string;
+	decision: "auto_approve" | "confirm" | "block";
+	category: ActionCategory;
+	manifestId: string;
 	reason?: string;
 }
 
@@ -14,7 +23,7 @@ export interface FilterResponse {
 /** Confirmation response from /confirm-only */
 export interface ConfirmResponse {
 	decision: "auto_approve" | "confirm" | "block" | "approved" | "denied";
-	category?: string;
+	category?: ActionCategory;
 	reason?: string;
 	manifestId: string;
 }
@@ -24,13 +33,13 @@ export interface PendingConfirmation {
 	manifestId: string;
 	tool: string;
 	parameters: Record<string, unknown>;
-	category: string;
+	category: ActionCategory;
 	reason?: string;
 }
 
 /** Health check response */
 export interface HealthResponse {
-	status: string;
+	status: "ok" | "unreachable" | (string & {});
 	version?: string;
 }
 

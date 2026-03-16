@@ -168,9 +168,9 @@ const server = serve({ fetch: app.fetch, port, hostname: host }, () => {
 	}
 });
 
-// SENTINEL: Wave 2.4+ — CONNECT tunnel proxy for Docker-contained agents
-// Enables HTTP CONNECT method on the same port as the executor, allowing agents
-// to use HTTPS_PROXY=http://executor:3141 for outbound HTTPS via tunneled connections.
+// SENTINEL: CONNECT tunnel proxy — enables Docker-contained agents to make
+// outbound HTTPS via HTTPS_PROXY=http://executor:3141
+// Enables HTTP CONNECT method on the same port as the executor.
 if (egressBindings.length > 0) {
 	const connectHandler = createConnectHandler({
 		authToken: config.authToken,

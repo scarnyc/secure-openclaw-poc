@@ -19,6 +19,19 @@ export type {
 const DEFAULT_TIMEOUT_MS = 30_000;
 const DEFAULT_CONFIRMATION_TIMEOUT_MS = 330_000;
 const POLL_INTERVAL_MS = 2_000;
+const MAX_CONSECUTIVE_ERRORS = 3;
+
+function assertObject(value: unknown, context: string): asserts value is Record<string, unknown> {
+	if (!value || typeof value !== "object" || Array.isArray(value)) {
+		throw new SentinelGuardError(`Invalid response shape from ${context}: expected object`, 500);
+	}
+}
+
+function assertArray(value: unknown, context: string): asserts value is unknown[] {
+	if (!Array.isArray(value)) {
+		throw new SentinelGuardError(`Invalid response shape from ${context}: expected array`, 500);
+	}
+}
 
 export class SentinelGuard {
 	private readonly baseUrl: string;
@@ -27,9 +40,15 @@ export class SentinelGuard {
 	private readonly confirmationTimeoutMs: number;
 
 	constructor(options: GuardClientOptions) {
+		if (!options.executorUrl) {
+			throw new SentinelGuardError("executorUrl is required", 0);
+		}
 		this.baseUrl = options.executorUrl.replace(/\/+$/, "");
 		this.authToken = options.authToken;
 		this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+		if (this.timeoutMs <= 0) {
+			throw new SentinelGuardError("timeoutMs must be positive", 0);
+		}
 		this.confirmationTimeoutMs = options.confirmationTimeoutMs ?? DEFAULT_CONFIRMATION_TIMEOUT_MS;
 	}
 
@@ -54,7 +73,7 @@ export class SentinelGuard {
 		return this.post("/filter-output", { output, agentId, tool });
 	}
 
-	/** Classify + confirm (blocks until user approves/denies or timeout). */
+	/** Classify and, if confirmation needed, block until user approves/denies or timeout. Auto-approved tools return immediately. */
 	async confirmOnly(
 		tool: string,
 		params: Record<string, unknown>,
@@ -78,14 +97,33 @@ export class SentinelGuard {
 	 * Poll /pending-confirmations until a specific manifest is resolved.
 	 * Returns true if the manifest is no longer pending (resolved), false on timeout.
 	 */
-	async awaitConfirmation(manifestId: string, timeoutMs?: number): Promise<boolean> {
+	async awaitConfirmation(
+		manifestId: string,
+		timeoutMs?: number,
+		signal?: AbortSignal,
+	): Promise<boolean> {
 		const deadline = Date.now() + (timeoutMs ?? this.confirmationTimeoutMs);
+		let consecutiveErrors = 0;
 
 		while (Date.now() < deadline) {
-			const pending = await this.pendingConfirmations();
-			const found = pending.some((p) => p.manifestId === manifestId);
-			if (!found) {
-				return true;
+			if (signal?.aborted) {
+				throw new SentinelGuardError("Confirmation polling aborted", 0);
+			}
+			try {
+				const pending = await this.pendingConfirmations();
+				consecutiveErrors = 0;
+				const found = pending.some((p) => p.manifestId === manifestId);
+				if (!found) {
+					return true;
+				}
+			} catch (error) {
+				consecutiveErrors++;
+				if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+					throw new SentinelGuardError(
+						`Polling failed after ${MAX_CONSECUTIVE_ERRORS} consecutive errors: ${error instanceof Error ? error.message : String(error)}`,
+						500,
+					);
+				}
 			}
 			await sleep(POLL_INTERVAL_MS);
 		}
@@ -94,7 +132,7 @@ export class SentinelGuard {
 
 	/** List all pending confirmations. */
 	async pendingConfirmations(): Promise<PendingConfirmation[]> {
-		return this.get("/pending-confirmations");
+		return this.getArray("/pending-confirmations");
 	}
 
 	/** Proxy an LLM request through the executor. */
@@ -114,6 +152,11 @@ export class SentinelGuard {
 				throw new SentinelGuardError(`LLM proxy returned ${res.status}: ${text}`, res.status);
 			}
 			return res;
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new SentinelGuardError("Request timed out", 408);
+			}
+			throw error;
 		} finally {
 			clearTimeout(timer);
 		}
@@ -142,7 +185,14 @@ export class SentinelGuard {
 				const text = await res.text();
 				throw new SentinelGuardError(`Executor returned ${res.status}: ${text}`, res.status);
 			}
-			return (await res.json()) as T;
+			const json: unknown = await res.json();
+			assertObject(json, `POST ${path}`);
+			return json as T;
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new SentinelGuardError("Request timed out", 408);
+			}
+			throw error;
 		} finally {
 			clearTimeout(timer);
 		}
@@ -161,7 +211,40 @@ export class SentinelGuard {
 				const text = await res.text();
 				throw new SentinelGuardError(`Executor returned ${res.status}: ${text}`, res.status);
 			}
-			return (await res.json()) as T;
+			const json: unknown = await res.json();
+			assertObject(json, `GET ${path}`);
+			return json as T;
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new SentinelGuardError("Request timed out", 408);
+			}
+			throw error;
+		} finally {
+			clearTimeout(timer);
+		}
+	}
+
+	private async getArray<T>(path: string): Promise<T[]> {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+		try {
+			const res = await fetch(`${this.baseUrl}${path}`, {
+				method: "GET",
+				headers: this.headers(),
+				signal: controller.signal,
+			});
+			if (!res.ok) {
+				const text = await res.text();
+				throw new SentinelGuardError(`Executor returned ${res.status}: ${text}`, res.status);
+			}
+			const json: unknown = await res.json();
+			assertArray(json, `GET ${path}`);
+			return json as T[];
+		} catch (error) {
+			if (error instanceof Error && error.name === "AbortError") {
+				throw new SentinelGuardError("Request timed out", 408);
+			}
+			throw error;
 		} finally {
 			clearTimeout(timer);
 		}
