@@ -4,8 +4,6 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 
 ## Current Phase: Phase 2 — Integrations + Real Agents
 
-For proper Docker deployment of OpenClaw with Telegram, we'd need to: Install openclaw in the container, Mount/inject the openclaw.json config (with Telegram bot token via vault), Give it egress access through the executor proxy, Run openclaw gateway start as the entrypoint.
-
 **Next Steps**:
 1. Context budget enforcement: per-result 30% cap, global 75% cap
 2. Tool recursion depth limiting: max depth 5 for agent-to-agent calls
@@ -13,23 +11,23 @@ For proper Docker deployment of OpenClaw with Telegram, we'd need to: Install op
 **Roadmap**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 **Wave spec**: `docs/superpowers/specs/2026-03-10-phase-2-waves-design.md`
 4. Set Anthropic and Gemini API keys to work with Plano
-Optional follow-up (separate commit) | The config only has sentinel-openai provider routing through the proxy. There's no sentinel-anthropic or sentinel-gemini provider. The Anthropic auth profile uses direct `mode: "token"` — which means Anthropic API calls would bypass Sentinel's proxy. This may be intentional if you're only using GPT-5.4 for now, but worth noting for later.
+Optional follow-up (separate commit) | The config only has sentinel-openai provider routing through the proxy. There's no sentinel-anthropic or sentinel-gemini provider. The Anthropic auth profile uses direct `mode: "token"` — which means Anthropic API calls would bypass Sentinel's proxy. This may be intentional if you're only using GPT-5.4 for now, but worth noting for later. Investigate Anthropic API failures — The 34% failure rate and malformed /anthropic/v1/messages path suggest a ANTHROPIC_BASE_URL misconfiguration. Fix the URL double-prefix issue.
 5. Update TIER_CONSTRAINTS strings in setup-openclaw.ts to match the new conversational tone (currently they read like policy docs too)
 6. Update the inline fallback template at setup-openclaw.ts:165-171 (only fires if template file missing)
-7. Set up sentinel memory plugin
+7. Set up sentinel memory plugin. Add memory operation test scenarios — Invariants 4 (size caps) and 5 (no credentials in memory) are completely unexercised in production. Generate test workloads that exercise memory writes. OpenClaw memory isolation — separate memory systems (Phase 3)
 8. Fix set-up and create guide to make it more intuitive and user friendly
 9. Right now openclaw classifies everything as a write command. Add a name-based heuristic (or probabalistic) in the classifier — tools with search, read, list, get, view in the name default to "read" instead of "write"
 10. Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates):
 - Execution result passthrough | plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
 - Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
-11. Revisit architecture to steal OpenAI's equip framework: https://openai.com/index/equip-responses-api-computer-environment/ | plan: `/Users/wills_mac_mini/.claude/plans/velvety-fluttering-hummingbird.md`
-12. Update SOUL.md and AGENTS.md so that openclaw knows what sentinel is aware of it. Keep the level of detail 'as needed' so it can't modify sentinel settings
-13. OpenClaw memory isolation — separate memory systems (Phase 3)
-14. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
-15. Plugin hot-reload — currently requires gateway restart
-16. secure telegram channels upon server wind-down
-17. Fix vault password masking upon `sentinel start`
-18. Custom undici dispatcher | Full content visibility through CONNECT tunnels (follow-up to domain-level CONNECT proxy). Placeholder injection at proxy. More work but no compromises. Could be built as a general-purpose solution for any library using undici
+11. Update SOUL.md and AGENTS.md so that openclaw knows what sentinel is aware of it. Keep the level of detail 'as needed' so it can't modify sentinel settings
+12. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
+13. Plugin hot-reload — currently requires gateway restart
+14. secure telegram channels upon server wind-down
+15. Fix vault password masking upon `sentinel start`
+16. Custom undici dispatcher | Full content visibility through CONNECT tunnels (follow-up to domain-level CONNECT proxy). Placeholder injection at proxy. More work but no compromises. Could be built as a general-purpose solution for any library using undici
+17. Populate parameters_summary in /classify — Change classify-endpoint.ts:107 from parameters_summary: "" to parameters_summary: redactCredentials(JSON.stringify(params).substring(0, 500)) for audit forensics. 
+18. Stress-test rate limiter and loop guard — These guards have never fired in production. Consider adding a load test that generates >60 req/min to verify they work under pressure, not just in unit tests.
 
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
