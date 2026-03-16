@@ -7,7 +7,14 @@ import type { Context } from "hono";
 function summarizeParams(params: Record<string, unknown>): string {
 	// Redact BEFORE truncating — truncation can split credential patterns,
 	// causing partial credentials to survive regex matching (Invariant #1)
-	const redacted = redactCredentials(JSON.stringify(params));
+	let json: string;
+	try {
+		json = JSON.stringify(params);
+	} catch {
+		// BigInt, circular refs, or other non-serializable values
+		return "[unserializable]";
+	}
+	const redacted = redactCredentials(json);
 	return redacted.length > 500 ? `${redacted.substring(0, 497)}...` : redacted;
 }
 

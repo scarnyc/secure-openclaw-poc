@@ -596,8 +596,15 @@ describe("classify", () => {
 			expect(inferCategoryFromName("read_config")).toBe("read");
 		});
 
+		it("hyphenated tool names recognized", () => {
+			expect(inferCategoryFromName("search-records")).toBe("read");
+			expect(inferCategoryFromName("list-channels")).toBe("read");
+			expect(inferCategoryFromName("delete-user")).toBe("write");
+			expect(inferCategoryFromName("send-message")).toBe("write");
+		});
+
 		it("camelCase names fall through to write (no camelCase boundary support)", () => {
-			// Known limitation: regex only matches at _ and __ boundaries.
+			// Known limitation: regex only matches at _, __, and - boundaries.
 			// CamelCase MCP tools (GitHub, Slack) all default to write (fail-closed).
 			expect(inferCategoryFromName("getUser")).toBe("write");
 			expect(inferCategoryFromName("listPullRequests")).toBe("write");

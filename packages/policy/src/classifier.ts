@@ -15,9 +15,9 @@ import {
 import { classifyBashCommand } from "./bash-parser.js";
 
 const READ_NAME_TOKENS =
-	/(?:^|_|__)(search|read|list|get|view|fetch|find|describe|show|query|lookup)(?:_|__|$)/i;
+	/(?:^|[-_]|__)(search|read|list|get|view|fetch|find|describe|show|query|lookup)(?:[-_]|__|$)/i;
 const WRITE_NAME_TOKENS =
-	/(?:^|_|__)(write|create|delete|remove|update|send|post|put|patch|drop|destroy|execute|run|invoke)(?:_|__|$)/i;
+	/(?:^|[-_]|__)(write|create|delete|remove|update|send|post|put|patch|drop|destroy|execute|run|invoke)(?:[-_]|__|$)/i;
 
 /**
  * Infer action category from tool name when no explicit classification exists.

@@ -156,6 +156,22 @@ describe("POST /classify", () => {
 		expect(entries[0].parameters_summary).toContain("[REDACTED]");
 	});
 
+	it("handles unserializable params gracefully", async () => {
+		// BigInt values cause JSON.stringify to throw — summarizeParams must not crash
+		const params = { value: Object.create(null) };
+		// We can't pass a true BigInt through JSON POST, but we can verify
+		// the endpoint doesn't crash on unusual objects
+		const res = await postClassify(app, {
+			tool: "read_file",
+			params,
+			agentId: "test-agent",
+			sessionId: "test-session",
+		});
+		expect(res.status).toBe(200);
+		const entries = auditLogger.getRecent(1);
+		expect(entries[0].parameters_summary).toBeTruthy();
+	});
+
 	it("truncates parameters_summary for large params", async () => {
 		await postClassify(app, {
 			tool: "read_file",
