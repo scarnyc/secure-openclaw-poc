@@ -11,6 +11,8 @@ RUN find packages -name dist -type d -exec rm -rf {} + 2>/dev/null; true
 RUN find packages -name '*.tsbuildinfo' -delete 2>/dev/null; true
 RUN find packages -name '*.test.ts' -delete 2>/dev/null; true
 RUN npx tsc -b
+# Bundle openclaw-plugin for OpenClaw's extension loader (reads package.json "openclaw.extensions")
+RUN cd packages/openclaw-plugin && npx tsup --config tsup.bundle.config.ts
 
 # Executor stage
 FROM node:22-alpine AS executor
@@ -45,9 +47,11 @@ CMD ["node", "packages/agent/dist/loop.js"]
 # SENTINEL: Wave 2.4 — Real OpenClaw gateway running inside Docker on sentinel-internal.
 # All egress routes through executor's /proxy/egress; LLM calls through /proxy/llm.
 FROM node:22-alpine AS openclaw-gateway
-RUN apk add --no-cache dumb-init
-# Install OpenClaw globally
-RUN npm install -g openclaw@latest 2>/dev/null || echo "[openclaw-gateway] WARN: openclaw not on npm yet — gateway will use stub mode"
+RUN apk add --no-cache dumb-init git
+# Install OpenClaw globally (git required by transitive dependency)
+RUN npm install -g openclaw@2026.3.13
+# Remove git after install to reduce image size
+RUN apk del git
 WORKDIR /app
 # Copy Sentinel plugin from build stage
 COPY --from=build /app/packages/openclaw-plugin/dist/ ./plugin/dist/

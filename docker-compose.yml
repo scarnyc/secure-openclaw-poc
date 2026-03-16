@@ -89,10 +89,8 @@ services:
       context: .
       target: openclaw-gateway
     volumes:
-      # Writable volumes for OpenClaw state
-      - openclaw-workspace:/home/node/.openclaw/workspace:rw
-      - openclaw-agents:/home/node/.openclaw/agents:rw
-      - openclaw-logs:/home/node/.openclaw/logs:rw
+      # Writable volume for OpenClaw config + state (read_only container)
+      - openclaw-data:/home/node/.openclaw:rw
     environment:
       - SENTINEL_EXECUTOR_URL=http://executor:3141
       - SENTINEL_AUTH_TOKEN=${SENTINEL_AUTH_TOKEN:-}
@@ -102,8 +100,8 @@ services:
       - SENTINEL_TELEGRAM_POLLER=${SENTINEL_TELEGRAM_POLLER:-gateway}
       - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - NODE_ENV=production
-    mem_limit: 256m
-    cpus: "0.5"
+    mem_limit: 2g
+    cpus: "1.0"
     pids_limit: 128
     read_only: true
     tmpfs:
@@ -119,7 +117,7 @@ services:
       executor:
         condition: service_healthy
     ports:
-      - "127.0.0.1:18789:18789"
+      - "127.0.0.1:18790:18789"
     expose:
       - "18789"
     healthcheck:
@@ -145,6 +143,4 @@ networks:
     driver: bridge
 
 volumes:
-  openclaw-workspace:
-  openclaw-agents:
-  openclaw-logs:
+  openclaw-data:

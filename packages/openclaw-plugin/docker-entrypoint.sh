@@ -4,7 +4,9 @@ set -e
 CONFIG_DIR="${HOME}/.openclaw"
 CONFIG_FILE="${CONFIG_DIR}/openclaw.json"
 
-mkdir -p "${CONFIG_DIR}"
+# Create required directories (avoids CRITICAL doctor warnings)
+mkdir -p "${CONFIG_DIR}/agents/main/sessions" "${CONFIG_DIR}/credentials" "${CONFIG_DIR}/workspace" 2>/dev/null || true
+chmod 700 "${CONFIG_DIR}" 2>/dev/null || true
 
 # Generate OpenClaw config from environment variables
 # - LLM provider routes through executor's proxy
@@ -13,19 +15,36 @@ mkdir -p "${CONFIG_DIR}"
 cat > "${CONFIG_FILE}" << EOCFG
 {
   "models": {
+    "mode": "merge",
     "providers": {
       "sentinel-openai": {
         "baseUrl": "${SENTINEL_EXECUTOR_URL:-http://executor:3141}/proxy/llm/openai/v1",
         "apiKey": "${SENTINEL_AUTH_TOKEN:-}",
-        "api": "openai"
+        "api": "openai-completions",
+        "models": [
+          {
+            "id": "gpt-5.4",
+            "name": "GPT-5.4",
+            "contextWindow": 1047576,
+            "maxTokens": 32768
+          }
+        ]
       }
-    },
-    "default": "sentinel-openai"
+    }
+  },
+  "agents": {
+    "defaults": {
+      "model": "sentinel-openai/gpt-5.4",
+      "workspace": "/home/node/.openclaw/workspace"
+    }
   },
   "channels": {
     "telegram": {
       "botToken": "SENTINEL_PLACEHOLDER_telegram_bot__key",
-      "enabled": true
+      "enabled": true,
+      "dmPolicy": "pairing",
+      "groupPolicy": "allowlist",
+      "streaming": "partial"
     }
   },
   "plugins": {
@@ -46,7 +65,8 @@ cat > "${CONFIG_FILE}" << EOCFG
   },
   "gateway": {
     "port": 18789,
-    "bind": "0.0.0.0"
+    "mode": "local",
+    "bind": "lan"
   }
 }
 EOCFG
@@ -55,5 +75,9 @@ echo "[openclaw-gateway] Config written to ${CONFIG_FILE}"
 echo "[openclaw-gateway] Executor: ${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
 echo "[openclaw-gateway] Plugin: /app/plugin"
 
-# Start OpenClaw gateway
+# Start OpenClaw gateway (no self-respawn in container)
+echo "[openclaw-gateway] Starting OpenClaw gateway..."
+export OPENCLAW_NO_RESPAWN=1
+export NODE_OPTIONS="--max-old-space-size=1536"
+chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
 exec openclaw gateway run --port 18789 --bind lan --allow-unconfigured
