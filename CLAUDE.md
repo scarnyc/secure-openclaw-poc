@@ -17,9 +17,7 @@ Optional follow-up (separate commit) | The config only has sentinel-openai provi
 7. Set up sentinel memory plugin. Add memory operation test scenarios — Invariants 4 (size caps) and 5 (no credentials in memory) are completely unexercised in production. Generate test workloads that exercise memory writes. OpenClaw memory isolation — separate memory systems (Phase 3)
 8. Fix set-up and create guide to make it more intuitive and user friendly
 9. ~~Name-based read heuristic in classifier~~ (done — PR #34, `inferCategoryFromName` with fail-closed write precedence)
-10. Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates):
-- Execution result passthrough | plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
-- Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
+10. Execution delegation via upstream hook change — propose `result` field on `BeforeToolCallResult` to OpenClaw (spec: `docs/superpowers/specs/2026-03-16-execution-delegation-design.md`). When available: Sentinel executes tools, filters results, returns sanitized output via hook. Interim: 6-layer advisory defense (classify + confirm + output redact + message redact + network isolation + credential isolation)
 11. Update SOUL.md and AGENTS.md so that openclaw knows what sentinel is aware of it. Keep the level of detail 'as needed' so it can't modify sentinel settings
 12. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
 13. Plugin hot-reload — currently requires gateway restart
