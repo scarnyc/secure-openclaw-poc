@@ -4,6 +4,8 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 
 ## Current Phase: Phase 2 — Integrations + Real Agents
 
+For proper Docker deployment of OpenClaw with Telegram, we'd need to: Install openclaw in the container, Mount/inject the openclaw.json config (with Telegram bot token via vault), Give it egress access through the executor proxy, Run openclaw gateway start as the entrypoint.
+
 **Next Steps**:
 1. Context budget enforcement: per-result 30% cap, global 75% cap
 2. Tool recursion depth limiting: max depth 5 for agent-to-agent calls
@@ -14,25 +16,19 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 Optional follow-up (separate commit) | The config only has sentinel-openai provider routing through the proxy. There's no sentinel-anthropic or sentinel-gemini provider. The Anthropic auth profile uses direct `mode: "token"` — which means Anthropic API calls would bypass Sentinel's proxy. This may be intentional if you're only using GPT-5.4 for now, but worth noting for later.
 5. Update TIER_CONSTRAINTS strings in setup-openclaw.ts to match the new conversational tone (currently they read like policy docs too)
 6. Update the inline fallback template at setup-openclaw.ts:165-171 (only fires if template file missing)
-7. ~~Update ExecutorClient to add confirmOnly() method~~ (done — Wave 2.4)
-8. ~~Wire register.ts into openclaw-plugin index.ts exports~~ (done — Wave 2.4)
-9. Set up sentinel memory plugin
-10. Fix set-up and create guide to make it more intuitive and user friendly
-11. use ag-ui protocol for all UI approve / rejects (BLOCKED: grammY uses undici dispatcher, not globalThis.fetch — CONNECT proxy provides transport but tunnel is opaque, can't intercept confirmation callbacks; needs executor-as-sole-poller + message forwarding, or ag-ui, or OpenClaw upstream apiRoot/callback_query hook) | Approach 5: Hybrid — Single Poller + ag-ui Events:
-  - Executor owns the single Telegram poll loop (existing)
-  - Exposes ag-ui SSE endpoint for real-time event streaming
-  - Telegram becomes one "renderer" of ag-ui events alongside web/TUI
-  - Confirmation is modeled as a custom ag-ui event pair: ConfirmationRequested → ConfirmationResolved
-12. Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates):
+7. Set up sentinel memory plugin
+8. Fix set-up and create guide to make it more intuitive and user friendly
+9. Right now openclaw classifies everything as a write command. Add a name-based heuristic (or probabalistic) in the classifier — tools with search, read, list, get, view in the name default to "read" instead of "write"
+10. Route ALL OpenClaw execution through Sentinel (blocked by OpenClaw hook API — `before_tool_call` can't replace execution; Docker network isolation mitigates):
 - Execution result passthrough | plugin returns Sentinel's filtered output as OpenClaw tool result (depends on full execution routing)
 - Context compaction — per-result 30% cap, global 75% cap (performance optimization, not security)
-13. Revisit architecture to steal OpenAI's equip framework: https://openai.com/index/equip-responses-api-computer-environment/ | plan: `/Users/wills_mac_mini/.claude/plans/velvety-fluttering-hummingbird.md`
-14. Update SOUL.md and AGENTS.md so that openclaw knows what sentinel is aware of it. Keep the level of detail 'as needed' so it can't modify sentinel settings
-15. OpenClaw memory isolation — separate memory systems (Phase 3)
-16. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
-17. Plugin hot-reload — currently requires gateway restart
-18. secure telegram channels upon server wind-down
-19. Fix vault password masking upon `sentinel start`
+11. Revisit architecture to steal OpenAI's equip framework: https://openai.com/index/equip-responses-api-computer-environment/ | plan: `/Users/wills_mac_mini/.claude/plans/velvety-fluttering-hummingbird.md`
+12. Update SOUL.md and AGENTS.md so that openclaw knows what sentinel is aware of it. Keep the level of detail 'as needed' so it can't modify sentinel settings
+13. OpenClaw memory isolation — separate memory systems (Phase 3)
+14. Webhook support in Docker — requires inbound connections incompatible with `internal: true` (cloud deployment scope)
+15. Plugin hot-reload — currently requires gateway restart
+16. secure telegram channels upon server wind-down
+17. Fix vault password masking upon `sentinel start`
 
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
@@ -397,7 +393,7 @@ Defined in `.claude/settings.json` — includes test, lint, and typecheck comman
 - [ ] Claude Code integrations and heartbeats for coding tasks via notes
 - [ ] Promptfoo for evals and red teaming (pen testing, adversarial attacks): https://github.com/promptfoo/promptfoo#readme
 - [ ] Posthog for app analytics: https://posthog.com/
-- [ ] Moltworkers CF deployment: (https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/) | (https://github.com/cloudflare/moltworker) **Note for CF** for later, local network reachability for POC — SENTINEL_CONFIRM_BASE_URL set to Mac Mini LAN IP. Production: Cloudflare Tunnel or Telegram WebApp
+- [ ] Moltworkers CF deployment: (https://blog.cloudflare.com/moltworker-self-hosted-ai-agent/) | (https://github.com/cloudflare/moltworker)
 - [ ] Paperclip: Open-source orchestration for zero-human companies | https://github.com/paperclipai/paperclip
 
 ### References
