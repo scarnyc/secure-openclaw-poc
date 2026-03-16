@@ -80,12 +80,16 @@ echo "[openclaw-gateway] Starting OpenClaw gateway..."
 export OPENCLAW_NO_RESPAWN=1
 chmod 600 "${CONFIG_FILE}" 2>/dev/null || true
 
-# SENTINEL: Do NOT set HTTPS_PROXY — it would bypass our fetch interceptor.
-# OpenClaw uses globalThis.fetch (undici), not node-fetch. Our fetch interceptor
-# in register.ts patches globalThis.fetch to route egress domains through the
-# executor's /proxy/egress REST endpoint, which handles credential injection,
-# SSRF protection, and Telegram confirmation interception. The CONNECT proxy
-# on port 3141 remains available as a fallback for any future HTTPS_PROXY needs.
+# SENTINEL: Route outbound HTTPS through executor's CONNECT proxy.
+# grammY uses undici's internal dispatcher (not globalThis.fetch), so our fetch
+# interceptor cannot catch its requests. HTTPS_PROXY is the only way to route
+# grammY's Telegram API calls through the executor to the internet.
+# The CONNECT tunnel is opaque — confirmation callbacks are handled by the
+# executor's own polling (SENTINEL_TELEGRAM_POLLER=executor).
+export HTTPS_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
+export HTTP_PROXY="${SENTINEL_EXECUTOR_URL:-http://executor:3141}"
+export NO_PROXY="executor,localhost,127.0.0.1,0.0.0.0"
+echo "[openclaw-gateway] HTTPS_PROXY=${HTTPS_PROXY} (CONNECT tunnel through executor)"
 
 export NODE_OPTIONS="--max-old-space-size=1536"
 
