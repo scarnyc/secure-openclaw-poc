@@ -42,11 +42,12 @@ ENTRYPOINT ["dumb-init", "--"]
 CMD ["node", "packages/agent/dist/loop.js"]
 
 # OpenClaw Gateway stage
-# SENTINEL: OpenClaw is not yet published to npm. This stage runs a lightweight
-# plugin host that loads the Sentinel plugin, exposes /health, and will be
-# replaced with `openclaw gateway` once the package is available.
+# SENTINEL: Wave 2.4 — Real OpenClaw gateway running inside Docker on sentinel-internal.
+# All egress routes through executor's /proxy/egress; LLM calls through /proxy/llm.
 FROM node:22-alpine AS openclaw-gateway
 RUN apk add --no-cache dumb-init
+# Install OpenClaw globally
+RUN npm install -g openclaw@latest 2>/dev/null || echo "[openclaw-gateway] WARN: openclaw not on npm yet — gateway will use stub mode"
 WORKDIR /app
 # Copy Sentinel plugin from build stage
 COPY --from=build /app/packages/openclaw-plugin/dist/ ./plugin/dist/
@@ -57,25 +58,11 @@ COPY --from=build /app/packages/types/dist/ ./packages/types/dist/
 COPY --from=build /app/packages/types/package.json ./packages/types/
 # Node modules for plugin runtime dependencies
 COPY --from=build /app/node_modules ./node_modules/
-RUN mkdir -p /app/data && chown node:node /app/data
+# Copy gateway entrypoint script
+COPY packages/openclaw-plugin/docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
+RUN mkdir -p /home/node/.openclaw /app/data && chown -R node:node /home/node/.openclaw /app/data
 USER node
-EXPOSE 8080
+EXPOSE 18789
 ENTRYPOINT ["dumb-init", "--"]
-# Lightweight plugin host: health endpoint + plugin readiness check
-CMD ["node", "-e", "\
-const http = require('http');\
-const fs = require('fs');\
-const pluginExists = fs.existsSync('/app/plugin/dist/register.js');\
-const manifest = pluginExists ? JSON.parse(fs.readFileSync('/app/plugin/openclaw.plugin.json','utf8')) : null;\
-console.log(`[openclaw-gateway] Plugin: ${manifest?.name ?? 'not found'} v${manifest?.version ?? '?'}`);\
-console.log(`[openclaw-gateway] Executor: ${process.env.SENTINEL_EXECUTOR_URL ?? 'not configured'}`);\
-const server = http.createServer((req,res) => {\
-  if (req.url === '/health') {\
-    res.writeHead(200, {'Content-Type':'application/json'});\
-    res.end(JSON.stringify({status:'ok',plugin:manifest?.name,version:manifest?.version}));\
-  } else {\
-    res.writeHead(404); res.end();\
-  }\
-});\
-server.listen(8080, '0.0.0.0', () => console.log('[openclaw-gateway] Listening on :8080'));\
-"]
+CMD ["/app/docker-entrypoint.sh"]

@@ -98,6 +98,9 @@ services:
       - SENTINEL_AUTH_TOKEN=${SENTINEL_AUTH_TOKEN:-}
       - SENTINEL_FAIL_MODE=closed
       - SENTINEL_DOCKER=true
+      - SENTINEL_EGRESS_DOMAINS=${SENTINEL_EGRESS_DOMAINS:-api.telegram.org}
+      - SENTINEL_TELEGRAM_POLLER=${SENTINEL_TELEGRAM_POLLER:-gateway}
+      - OPENCLAW_GATEWAY_TOKEN=${OPENCLAW_GATEWAY_TOKEN:-}
       - NODE_ENV=production
     mem_limit: 256m
     cpus: "0.5"
@@ -115,10 +118,12 @@ services:
     depends_on:
       executor:
         condition: service_healthy
+    ports:
+      - "127.0.0.1:18789:18789"
     expose:
-      - "8080"
+      - "18789"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:8080/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://localhost:18789/health').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3

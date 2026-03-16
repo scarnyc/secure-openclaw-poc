@@ -7,7 +7,7 @@ Sentinel is a security-hardened agent runtime with process isolation between the
 **Next Steps**:
 1. Context budget enforcement: per-result 30% cap, global 75% cap
 2. Tool recursion depth limiting: max depth 5 for agent-to-agent calls
-3. OpenClaw post-install: configure Brave Search provider (`openclaw configure --section model`), configure embedding provider for memory search, run `openclaw security audit --deep`
+3. Configure Brave Search provider (`openclaw configure --section model`), configure embedding provider for memory search, run `openclaw security audit --deep`
 **Roadmap**: `docs/plans/path-a-v2-adopt-openfang-primitives.md`
 **Wave spec**: `docs/superpowers/specs/2026-03-10-phase-2-waves-design.md`
 4. Set Anthropic and Gemini API keys to work with Plano
@@ -33,6 +33,7 @@ Optional follow-up (separate commit) | The config only has sentinel-openai provi
 17. Plugin hot-reload — currently requires gateway restart
 18. secure telegram channels upon server wind-down
 19. Fix vault password masking upon `sentinel start`
+20. Google workspace starter account + consider OpenAI Pro account vs. Anthropic Max
 
 **Phase 1 completed** (PR #8, 490 tests). **Memory store** (PR #9, 542 tests). **Phase 2** decomposes into 4 waves.
 

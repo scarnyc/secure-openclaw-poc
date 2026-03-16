@@ -139,6 +139,9 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	};
 	if (useGatewayPoller) {
 		composeEnv.SENTINEL_TELEGRAM_POLLER = "gateway";
+		// Generate a shared gateway auth token for executor ↔ gateway communication
+		const gatewayToken = randomBytes(16).toString("hex");
+		composeEnv.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
 	}
 	if (vaultPassword) {
 		composeEnv.SENTINEL_VAULT_PASSWORD = vaultPassword;
@@ -253,17 +256,11 @@ export async function startCommand(projectRoot: string, services: string[]): Pro
 	// Show final status
 	console.log(`\n${run(projectRoot, "docker", ["compose", "-f", composeFile, "ps"])}`);
 
-	// SENTINEL: Restart host gateway as sole Telegram poller after executor is healthy.
-	// Only in gateway poller mode — executor polling is disabled via SENTINEL_TELEGRAM_POLLER=gateway.
+	// SENTINEL: Post-healthy gateway handling.
+	// In gateway poller mode, Docker gateway is the sole Telegram poller — do NOT restart host gateway.
+	// In standalone mode (no OpenClaw), restart host gateway for backward compat.
 	if (useGatewayPoller) {
-		try {
-			run(projectRoot, "openclaw", ["gateway", "restart"]);
-			console.log("Host-mode OpenClaw gateway restarted (sole Telegram poller).");
-		} catch {
-			console.warn(
-				"[sentinel] Failed to restart OpenClaw gateway — Telegram confirmations may not work.",
-			);
-		}
+		console.log("Docker gateway is sole Telegram poller (host gateway stopped, not restarted).");
 	} else {
 		// Non-gateway mode: still restart gateway if installed (backward compat)
 		try {
